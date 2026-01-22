@@ -209,6 +209,9 @@ public abstract partial class Component : BytePack.ISerializer
 	{
 		var startTime = FastTimer.StartNew();
 
+		Type memberType = null;
+		object value = null;
+
 		if ( member is PropertyDescription prop )
 		{
 			if ( !prop.IsSetMethodPublic )
@@ -219,36 +222,10 @@ public abstract partial class Component : BytePack.ISerializer
 				prop = declaringType.GetProperty( member.Name ) ?? prop;
 			}
 
-			var converter = member.GetCustomAttribute<JsonConverterAttribute>()?.CreateConverter( prop.PropertyType );
-			if ( converter is not null )
-			{
-				prop.SetValue( this, Json.FromNode( node, prop.PropertyType, converter ) );
-			}
-			else if ( prop.PropertyType.IsAssignableTo( typeof( IJsonPopulator ) ) )
-			{
-				var value = prop.GetValue( this );
-				if ( value == null ) value = Activator.CreateInstance( prop.PropertyType );
-
-				if ( value is IJsonPopulator jsonConvert )
-				{
-					jsonConvert.Deserialize( node );
-				}
-
-				if ( prop.PropertyType.IsValueType )
-				{
-					prop.SetValue( this, value );
-				}
-			}
-			else
-			{
-				prop.SetValue( this, Json.FromNode( node, prop.PropertyType ) );
-			}
-
-			StopTiming( prop, prop.PropertyType, startTime );
-			return;
+			memberType = prop.PropertyType;
+			value = prop.GetValue( this );
 		}
-
-		if ( member is FieldDescription field )
+		else if ( member is FieldDescription field )
 		{
 			if ( !field.IsPublic )
 			{
@@ -258,34 +235,48 @@ public abstract partial class Component : BytePack.ISerializer
 				field = declaringType.GetField( member.Name ) ?? field;
 			}
 
-			var converter = member.GetCustomAttribute<JsonConverterAttribute>()?.CreateConverter( field.FieldType );
-			if ( converter is not null )
-			{
-				field.SetValue( this, Json.FromNode( node, field.FieldType, converter ) );
-			}
-			else if ( field.FieldType.IsAssignableTo( typeof( IJsonPopulator ) ) )
-			{
-				var value = field.GetValue( this );
-				if ( value == null ) value = Activator.CreateInstance( field.FieldType );
-
-				if ( value is IJsonPopulator jsonConvert )
-				{
-					jsonConvert.Deserialize( node );
-				}
-
-				if ( field.FieldType.IsValueType )
-				{
-					field.SetValue( this, value );
-				}
-			}
-			else
-			{
-				field.SetValue( this, Json.FromNode( node, field.FieldType ) );
-			}
-
-			StopTiming( field, field.FieldType, startTime );
+			memberType = field.FieldType;
+			value = field.GetValue( this );
+		}
+		else
+		{
 			return;
 		}
+
+		object newValue = value;
+
+		var converter = member.GetCustomAttribute<JsonConverterAttribute>()?.CreateConverter( memberType );
+		if ( converter is not null )
+		{
+			newValue = Json.FromNode( node, memberType, converter );
+		}
+		else if ( memberType.IsAssignableTo( typeof( IJsonPopulator ) ) )
+		{
+			if ( value == null ) value = Activator.CreateInstance( memberType );
+
+			if ( value is IJsonPopulator jsonConvert )
+			{
+				jsonConvert.Deserialize( node );
+			}
+
+			if ( memberType.IsValueType )
+				newValue = value;
+		}
+		else
+		{
+			newValue = Json.FromNode( node, memberType );
+		}
+
+		if ( member is PropertyDescription prop2 )
+		{
+			prop2.SetValue( this, newValue );
+		}
+		else if ( member is FieldDescription field2 )
+		{
+			field2.SetValue( this, newValue );
+		}
+
+		StopTiming( member, memberType, startTime );
 	}
 
 	static object BytePack.ISerializer.BytePackRead( ref ByteStream bs, Type targetType )

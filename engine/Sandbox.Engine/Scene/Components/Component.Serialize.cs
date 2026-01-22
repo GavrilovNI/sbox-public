@@ -1,6 +1,7 @@
 ﻿using Facepunch.ActionGraphs;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
 namespace Sandbox;
 
@@ -76,9 +77,11 @@ public abstract partial class Component : BytePack.ISerializer
 				continue;
 			}
 
+
 			try
 			{
-				json.Add( member.Name, Json.ToNode( value, memberType ) );
+				var converter = member.GetCustomAttribute<JsonConverterAttribute>()?.CreateConverter( memberType );
+				json.Add( member.Name, Json.ToNode( value, memberType, converter ) );
 			}
 			catch ( System.Exception e )
 			{
@@ -216,7 +219,12 @@ public abstract partial class Component : BytePack.ISerializer
 				prop = declaringType.GetProperty( member.Name ) ?? prop;
 			}
 
-			if ( prop.PropertyType.IsAssignableTo( typeof( IJsonPopulator ) ) )
+			var converter = member.GetCustomAttribute<JsonConverterAttribute>()?.CreateConverter( prop.PropertyType );
+			if ( converter is not null )
+			{
+				prop.SetValue( this, Json.FromNode( node, prop.PropertyType, converter ) );
+			}
+			else if ( prop.PropertyType.IsAssignableTo( typeof( IJsonPopulator ) ) )
 			{
 				var value = prop.GetValue( this );
 				if ( value == null ) value = Activator.CreateInstance( prop.PropertyType );
@@ -250,7 +258,12 @@ public abstract partial class Component : BytePack.ISerializer
 				field = declaringType.GetField( member.Name ) ?? field;
 			}
 
-			if ( field.FieldType.IsAssignableTo( typeof( IJsonPopulator ) ) )
+			var converter = member.GetCustomAttribute<JsonConverterAttribute>()?.CreateConverter( field.FieldType );
+			if ( converter is not null )
+			{
+				field.SetValue( this, Json.FromNode( node, field.FieldType, converter ) );
+			}
+			else if ( field.FieldType.IsAssignableTo( typeof( IJsonPopulator ) ) )
 			{
 				var value = field.GetValue( this );
 				if ( value == null ) value = Activator.CreateInstance( field.FieldType );

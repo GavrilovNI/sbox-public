@@ -80,8 +80,20 @@ public abstract partial class Component : BytePack.ISerializer
 
 			try
 			{
-				var converter = member.GetCustomAttribute<JsonConverterAttribute>()?.CreateConverter( memberType );
-				json.Add( member.Name, Json.ToNode( value, memberType, converter ) );
+				var converterAttribute = member.GetCustomAttribute<JsonConverterAttribute>();
+				if ( converterAttribute is null )
+				{
+					json.Add( member.Name, Json.ToNode( value, memberType ) );
+				}
+				else
+				{
+					var converter = converterAttribute.ConverterType is null
+						? converterAttribute.CreateConverter( memberType )
+						: (JsonConverter)System.Activator.CreateInstance( converterAttribute.ConverterType );
+
+
+					json.Add( member.Name, Json.ToNode( value, memberType, converter ) );
+				}
 			}
 			catch ( System.Exception e )
 			{
@@ -245,9 +257,14 @@ public abstract partial class Component : BytePack.ISerializer
 
 		object newValue = value;
 
-		var converter = member.GetCustomAttribute<JsonConverterAttribute>()?.CreateConverter( memberType );
-		if ( converter is not null )
+		var converterAttribute = member.GetCustomAttribute<JsonConverterAttribute>();
+
+		if ( converterAttribute is not null )
 		{
+			var converter = converterAttribute.ConverterType is null
+				? converterAttribute.CreateConverter( memberType )
+				: (JsonConverter)System.Activator.CreateInstance( converterAttribute.ConverterType );
+
 			newValue = Json.FromNode( node, memberType, converter );
 		}
 		else if ( memberType.IsAssignableTo( typeof( IJsonPopulator ) ) )

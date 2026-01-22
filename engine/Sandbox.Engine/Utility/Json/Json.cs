@@ -221,12 +221,44 @@ public static partial class Json
 	}
 
 	/// <summary>
+	/// Serialize a single object to a JsonNode using specified JsonConverter with the given expected type
+	/// </summary>
+	public static JsonNode ToNode( object obj, Type type, JsonConverter converter )
+	{
+		if ( converter is null )
+			return ToNode( obj, type );
+
+		// TODO: Cache this
+		var tempOptions = new JsonSerializerOptions( options );
+		tempOptions.Converters.Clear();
+		tempOptions.Converters.Add( converter );
+
+		return System.Text.Json.JsonSerializer.SerializeToNode( obj, type, tempOptions );
+	}
+
+	/// <summary>
 	/// Deserialize a single object to a type
 	/// </summary>
 	public static object FromNode( JsonNode node, Type type )
 	{
 		if ( node is null ) return default;
 		return node.Deserialize( type, options );
+	}
+
+	/// <summary>
+	/// Deserialize a single object to a type using specified JsonConverter
+	/// </summary>
+	public static object FromNode( JsonNode node, Type type, JsonConverter converter )
+	{
+		if ( node is null ) return default;
+		if ( converter == null ) return FromNode( node, type );
+
+		// TODO: Cache this
+		var tempOptions = new JsonSerializerOptions( options );
+		tempOptions.Converters.Clear();
+		tempOptions.Converters.Add( converter );
+
+		return node.Deserialize( type, tempOptions );
 	}
 
 	/// <summary>

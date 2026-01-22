@@ -58,29 +58,31 @@ public abstract partial class Component : BytePack.ISerializer
 
 		foreach ( var member in ReflectionQueryCache.OrderedSerializableMembers( GetType() ) )
 		{
+			object value = null;
+			Type memberType = null;
+
 			if ( member is FieldDescription field )
 			{
-				var value = field.GetValue( this );
-				try
-				{
-					json.Add( field.Name, Json.ToNode( value, field.FieldType ) );
-				}
-				catch ( System.Exception e )
-				{
-					Log.Warning( e, $"Error when serializing {this}.{field.Name} ({e.Message})\n{value}" );
-				}
+				value = field.GetValue( this );
+				memberType = field.FieldType;
 			}
 			else if ( member is PropertyDescription prop )
 			{
-				var value = prop.GetValue( this );
-				try
-				{
-					json.Add( prop.Name, Json.ToNode( value, prop.PropertyType ) );
-				}
-				catch ( System.Exception e )
-				{
-					Log.Warning( e, $"Error when serializing {this}.{prop.Name} ({e.Message})\n{value}" );
-				}
+				value = prop.GetValue( this );
+				memberType = prop.PropertyType;
+			}
+			else
+			{
+				continue;
+			}
+
+			try
+			{
+				json.Add( member.Name, Json.ToNode( value, memberType ) );
+			}
+			catch ( System.Exception e )
+			{
+				Log.Warning( e, $"Error when serializing {this}.{member.Name} ({e.Message})\n{value}" );
 			}
 		}
 

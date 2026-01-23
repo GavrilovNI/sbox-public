@@ -2,6 +2,7 @@
 using Sandbox.ActionGraphs;
 using Sandbox.Engine;
 using Sandbox.MovieMaker;
+using System.Collections.Concurrent;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -254,8 +255,20 @@ public static partial class Json
 		return node.Deserialize( type, options );
 	}
 
+	private static readonly ConcurrentDictionary<Type, IUtf8JsonReaderBridge> Utf8JsonReaderBridgeCache = [];
 
-	private delegate object Utf8JsonReaderReadDelegate( JsonConverter converter, ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options );
+	private interface IUtf8JsonReaderBridge
+	{
+		object Read( JsonConverter converter, ref Utf8JsonReader reader, Type type, JsonSerializerOptions options );
+	}
+
+	private class Utf8JsonReaderBridge<T> : IUtf8JsonReaderBridge
+	{
+		public object Read( JsonConverter converter, ref Utf8JsonReader reader, Type type, JsonSerializerOptions options )
+		{
+			return ((JsonConverter<T>)converter).Read( ref reader, type, options );
+		}
+	}
 
 	/// <summary>
 	/// Deserialize a single object to a type using specified JsonConverter
@@ -272,13 +285,14 @@ public static partial class Json
 		var reader = new Utf8JsonReader( jsonBytes );
 		reader.Read();
 
-		Type genericConverterType = typeof( JsonConverter<> ).MakeGenericType( converter.Type );
+		if ( !Utf8JsonReaderBridgeCache.TryGetValue( converter.Type, out var bridge ) )
+		{
+			var bridgeType = typeof( Utf8JsonReaderBridge<> ).MakeGenericType( converter.Type );
+			bridge = (IUtf8JsonReaderBridge)Activator.CreateInstance( bridgeType );
+			Utf8JsonReaderBridgeCache[converter.Type] = bridge;
+		}
 
-		var readMethod = genericConverterType.GetMethod( "Read",
-			[typeof( Utf8JsonReader ).MakeByRefType(), typeof( Type ), typeof( JsonSerializerOptions )] );
-
-		var typedDelegate = (Utf8JsonReaderReadDelegate)Delegate.CreateDelegate( typeof( Utf8JsonReaderReadDelegate ), readMethod );
-		return typedDelegate.Invoke( converter, ref reader, type, options );
+		return bridge.Read( converter, ref reader, type, options );
 	}
 
 	/// <summary>

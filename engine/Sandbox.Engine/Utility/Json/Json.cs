@@ -2,7 +2,6 @@
 using Sandbox.ActionGraphs;
 using Sandbox.Engine;
 using Sandbox.MovieMaker;
-using System.Linq.Expressions;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -255,38 +254,8 @@ public static partial class Json
 		return node.Deserialize( type, options );
 	}
 
-	private static readonly Dictionary<Type, Delegate> JsonConvertersReadDelegatesCache = [];
-	private static object InvokeJsonConverterRead( JsonConverter converter, ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options )
-	{
-		if ( !JsonConvertersReadDelegatesCache.TryGetValue( typeToConvert, out var untypedDelegate ) )
-		{
-			// can't use JsonSerializer.Deserialize(node, targetType, options); with changed options
-			// because options must not be changed
-			// so we create a delegate to call JsonConverter<T>.Read method via Expression trees
-			var converterType = typeof( JsonConverter<> ).MakeGenericType( typeToConvert );
-
-			var readerRef = typeof( Utf8JsonReader ).MakeByRefType();
-			var method = converterType.GetMethod( "Read", [readerRef, typeof( Type ), typeof( JsonSerializerOptions )] );
-
-			var converterParam = Expression.Parameter( typeof( JsonConverter ), "converter" );
-			var readerParam = Expression.Parameter( readerRef, "reader" );
-			var typeParam = Expression.Parameter( typeof( Type ), "type" );
-			var optionsParam = Expression.Parameter( typeof( JsonSerializerOptions ), "options" );
-
-			var castedConverter = Expression.Convert( converterParam, converterType );
-			var call = Expression.Call( castedConverter, method, readerParam, typeParam, optionsParam );
-
-			var lambda = Expression.Lambda( call, converterParam, readerParam, typeParam, optionsParam );
-			untypedDelegate = lambda.Compile();
-			JsonConvertersReadDelegatesCache[typeToConvert] = untypedDelegate;
-		}
-
-		var typedDelegate = (Utf8JsonReaderReadDelegate)untypedDelegate;
-		return typedDelegate.Invoke( converter, ref reader, typeToConvert, options );
-	}
 
 	private delegate object Utf8JsonReaderReadDelegate( JsonConverter converter, ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options );
-
 
 	/// <summary>
 	/// Deserialize a single object to a type using specified JsonConverter
@@ -303,7 +272,13 @@ public static partial class Json
 		var reader = new Utf8JsonReader( jsonBytes );
 		reader.Read();
 
-		return InvokeJsonConverterRead( converter, ref reader, type, options );
+		Type genericConverterType = typeof( JsonConverter<> ).MakeGenericType( converter.Type );
+
+		var readMethod = genericConverterType.GetMethod( "Read",
+			[typeof( Utf8JsonReader ).MakeByRefType(), typeof( Type ), typeof( JsonSerializerOptions )] );
+
+		var typedDelegate = (Utf8JsonReaderReadDelegate)Delegate.CreateDelegate( typeof( Utf8JsonReaderReadDelegate ), readMethod );
+		return typedDelegate.Invoke( converter, ref reader, type, options );
 	}
 
 	/// <summary>

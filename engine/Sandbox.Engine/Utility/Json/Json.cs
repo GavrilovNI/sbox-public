@@ -2,6 +2,7 @@
 using Sandbox.ActionGraphs;
 using Sandbox.Engine;
 using Sandbox.MovieMaker;
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -228,12 +229,21 @@ public static partial class Json
 		if ( converter is null )
 			return ToNode( obj, type );
 
-		// TODO: Cache this
-		var tempOptions = new JsonSerializerOptions( options );
-		tempOptions.Converters.Clear();
-		tempOptions.Converters.Add( converter );
+		if ( converter is JsonConverterFactory factory )
+			converter = factory.CreateConverter( type, options );
 
-		return System.Text.Json.JsonSerializer.SerializeToNode( obj, type, tempOptions );
+		Type genericConverterType = typeof( JsonConverter<> ).MakeGenericType( converter.Type );
+
+		var writeMethod = genericConverterType.GetMethod( "Write",
+			[typeof( Utf8JsonWriter ), converter.Type, typeof( JsonSerializerOptions )] );
+
+		using var stream = new System.IO.MemoryStream();
+		using var writer = new Utf8JsonWriter( stream );
+
+		writeMethod.Invoke( converter, [writer, obj, options] );
+		writer.Flush();
+
+		return JsonNode.Parse( stream.ToArray() );
 	}
 
 	/// <summary>
@@ -245,6 +255,39 @@ public static partial class Json
 		return node.Deserialize( type, options );
 	}
 
+	private static readonly Dictionary<Type, Delegate> JsonConvertersReadDelegatesCache = [];
+	private static object InvokeJsonConverterRead( JsonConverter converter, ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options )
+	{
+		if ( !JsonConvertersReadDelegatesCache.TryGetValue( typeToConvert, out var untypedDelegate ) )
+		{
+			// can't use JsonSerializer.Deserialize(node, targetType, options); with changed options
+			// because options must not be changed
+			// so we create a delegate to call JsonConverter<T>.Read method via Expression trees
+			var converterType = typeof( JsonConverter<> ).MakeGenericType( typeToConvert );
+
+			var readerRef = typeof( Utf8JsonReader ).MakeByRefType();
+			var method = converterType.GetMethod( "Read", [readerRef, typeof( Type ), typeof( JsonSerializerOptions )] );
+
+			var converterParam = Expression.Parameter( typeof( JsonConverter ), "converter" );
+			var readerParam = Expression.Parameter( readerRef, "reader" );
+			var typeParam = Expression.Parameter( typeof( Type ), "type" );
+			var optionsParam = Expression.Parameter( typeof( JsonSerializerOptions ), "options" );
+
+			var castedConverter = Expression.Convert( converterParam, converterType );
+			var call = Expression.Call( castedConverter, method, readerParam, typeParam, optionsParam );
+
+			var lambda = Expression.Lambda( call, converterParam, readerParam, typeParam, optionsParam );
+			untypedDelegate = lambda.Compile();
+			JsonConvertersReadDelegatesCache[typeToConvert] = untypedDelegate;
+		}
+
+		var typedDelegate = (Utf8JsonReaderReadDelegate)untypedDelegate;
+		return typedDelegate.Invoke( converter, ref reader, typeToConvert, options );
+	}
+
+	private delegate object Utf8JsonReaderReadDelegate( JsonConverter converter, ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options );
+
+
 	/// <summary>
 	/// Deserialize a single object to a type using specified JsonConverter
 	/// </summary>
@@ -253,12 +296,14 @@ public static partial class Json
 		if ( node is null ) return default;
 		if ( converter == null ) return FromNode( node, type );
 
-		// TODO: Cache this
-		var tempOptions = new JsonSerializerOptions( options );
-		tempOptions.Converters.Clear();
-		tempOptions.Converters.Add( converter );
+		if ( converter is JsonConverterFactory factory )
+			converter = factory.CreateConverter( type, options );
 
-		return node.Deserialize( type, tempOptions );
+		var jsonBytes = JsonSerializer.SerializeToUtf8Bytes( node );
+		var reader = new Utf8JsonReader( jsonBytes );
+		reader.Read();
+
+		return InvokeJsonConverterRead( converter, ref reader, type, options );
 	}
 
 	/// <summary>

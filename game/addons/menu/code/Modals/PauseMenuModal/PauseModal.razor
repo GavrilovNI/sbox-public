@@ -20,7 +20,14 @@
                </div>
 
                <div class="right">
-                    
+                   
+                   @{
+                        var ident = game?.FullIdent.Split('#')[0] ?? "unknown/unknown";
+                        var url = $"https://sbox.game/game/pause/{ident}";
+                        //var url = $"https://localhost:44338/game/pause/{ident}";
+                        <WebPanel class="browser" Url="@url"></WebPanel>
+                    }
+
                </div>
 
         </div>
@@ -107,5 +114,37 @@
             game = await Package.FetchAsync(ident, false) ?? game;
             StateHasChanged();
         }
+    }
+
+    public override void Tick()
+    {
+        base.Tick();
+
+        CheckForDelete();
+    }
+
+    bool CheckForDelete()
+    {
+        if (MenuUtility.GamePackage == null)
+        {
+            Delete();
+            return true;
+        }
+
+        if (MenuUtility.GamePackage?.Ident != game?.Ident)
+        {
+            Delete();
+            return true;
+        }
+
+        return false;
+    }
+
+    public bool IsPauseMenuOpen()
+    {
+        if (CheckForDelete() ) 
+            return false;
+
+        return !HasClass( "hidden" );
     }
 }

@@ -17,6 +17,12 @@ PauseModal.modal
 		padding: 4rem;
 		gap: 2rem;
 	}
+
+	&.hidden
+	{
+		opacity: 0;
+		pointer-events: none;
+	}
 }
 
 
@@ -151,4 +157,11 @@ PauseModal .tiles-container
 		flex-grow: 1;
 		overflow: hidden;
 	}
+}
+
+.browser
+{
+	flex-grow: 1;
+	width: 100%;
+	height: 100%;
 }

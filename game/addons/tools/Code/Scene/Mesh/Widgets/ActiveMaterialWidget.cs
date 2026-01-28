@@ -1,5 +1,4 @@
-﻿using Sandbox.UI;
-
+﻿
 namespace Editor.MeshEditor;
 
 class ActiveMaterialWidget : ControlWidget
@@ -16,7 +15,7 @@ class ActiveMaterialWidget : ControlWidget
 
 		ToolTip = "";
 
-		_materialWidget = Layout.Add( new MaterialWidget() );
+		_materialWidget = Layout.Add( new MaterialWidget( this ) );
 		_materialWidget.ToolTip = "Active Material";
 		_materialWidget.FixedSize = FixedHeight - 22;
 		_materialWidget.Cursor = CursorShape.Finger;
@@ -31,6 +30,7 @@ class ActiveMaterialWidget : ControlWidget
 
 		Frame();
 	}
+
 	protected override void OnPaint()
 	{
 		// nothing
@@ -48,6 +48,9 @@ class ActiveMaterialWidget : ControlWidget
 		m.AddSeparator();
 		m.AddOption( "Copy", "file_copy", action: Copy ).Enabled = asset != null;
 		m.AddOption( "Paste", "content_paste", action: Paste );
+		m.AddSeparator();
+		m.AddOption( "Select Faces Using Material", "texture", action: SelectFacesWithMaterial ).Enabled = resource is Material;
+		m.AddOption( "Select Objects Using Material", "category", action: SelectObjectsWithMaterial ).Enabled = resource is Material;
 		m.AddSeparator();
 		m.AddOption( "Clear", "backspace", action: Clear ).Enabled = resource != null;
 
@@ -80,6 +83,80 @@ class ActiveMaterialWidget : ControlWidget
 		SerializedProperty.Parent.NoteFinishEdit( SerializedProperty );
 	}
 
+	void SelectFacesWithMaterial()
+	{
+		var material = SerializedProperty.GetValue<Resource>( null ) as Material;
+		if ( material is null ) return;
+
+		var selection = SceneEditorSession.Active.Selection;
+		var scene = SceneEditorSession.Active.Scene;
+
+		if ( !Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Shift ) )
+			selection.Clear();
+
+		foreach ( var component in scene.GetAllComponents<MeshComponent>() )
+		{
+			if ( !component.IsValid() ) continue;
+
+			var mesh = component.Mesh;
+			if ( mesh is null ) continue;
+
+			foreach ( var face in mesh.FaceHandles )
+			{
+				var faceMaterial = mesh.GetFaceMaterial( face );
+
+				if ( faceMaterial != null && material != null &&
+					faceMaterial.ResourcePath == material.ResourcePath )
+				{
+					selection.Add( new MeshFace( component, face ) );
+				}
+			}
+		}
+
+		EditorToolManager.SetSubTool( nameof( FaceTool ) );
+	}
+
+	void SelectObjectsWithMaterial()
+	{
+		var material = SerializedProperty.GetValue<Resource>( null ) as Material;
+		if ( material is null ) return;
+
+		var selection = SceneEditorSession.Active.Selection;
+		var scene = SceneEditorSession.Active.Scene;
+
+		if ( !Application.KeyboardModifiers.HasFlag( KeyboardModifiers.Shift ) )
+			selection.Clear();
+
+		var objectsWithMaterial = new HashSet<GameObject>();
+
+		foreach ( var component in scene.GetAllComponents<MeshComponent>() )
+		{
+			if ( !component.IsValid() ) continue;
+
+			var mesh = component.Mesh;
+			if ( mesh is null ) continue;
+
+			foreach ( var face in mesh.FaceHandles )
+			{
+				var faceMaterial = mesh.GetFaceMaterial( face );
+
+				if ( faceMaterial != null && material != null &&
+					faceMaterial.ResourcePath == material.ResourcePath )
+				{
+					objectsWithMaterial.Add( component.GameObject );
+					break;
+				}
+			}
+		}
+
+		foreach ( var obj in objectsWithMaterial )
+		{
+			selection.Add( obj );
+		}
+
+		EditorToolManager.SetSubTool( nameof( MeshSelection ) );
+	}
+
 	private void UpdateFromAsset( Asset asset )
 	{
 		if ( asset is null ) return;
@@ -89,6 +166,15 @@ class ActiveMaterialWidget : ControlWidget
 
 		SerializedProperty.Parent.NoteStartEdit( SerializedProperty );
 		SerializedProperty.SetValue( resource );
+		SerializedProperty.Parent.NoteFinishEdit( SerializedProperty );
+	}
+
+	public void UpdateFromMaterial( Material material )
+	{
+		if ( material is null ) return;
+
+		SerializedProperty.Parent.NoteStartEdit( SerializedProperty );
+		SerializedProperty.SetValue( material );
 		SerializedProperty.Parent.NoteFinishEdit( SerializedProperty );
 	}
 

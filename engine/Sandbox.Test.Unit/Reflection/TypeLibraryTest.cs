@@ -347,6 +347,11 @@ public class TypeCollection
 		void DoSomething3( T3 value );
 	}
 
+	public interface IConstraintBreaker3<T> where T : IConstraintBreaker3<T>
+	{
+		void DoSomething( T value );
+	}
+
 
 	/// <summary>
 	/// 
@@ -365,6 +370,17 @@ public class TypeCollection
 		var badboy = tl.GetType( typeof( ConstraintBreaker<> ) )
 									.CreateGeneric<IConstraintBreaker<TypeWrapper>>( [typeof( TypeWrapper )] );
 		Assert.IsNull( badboy );
+	}
+
+	[TestMethod]
+	public void ObeyGenericConstraints2()
+	{
+		var tl = new Sandbox.Internal.TypeLibrary();
+		tl.AddAssembly( ThisAssembly, true );
+
+		var goodboy = tl.GetType( typeof( IConstraintBreaker3<> ) )
+									.MakeGenericType( [typeof( ConstraintBreaker3 )] );
+		Assert.IsNotNull( goodboy );
 	}
 
 
@@ -400,6 +416,15 @@ public readonly record struct TypeWrapper( Type Value );
 public class ConstraintBreaker<T> : IConstraintBreaker<T> where T : unmanaged
 {
 	public void DoSomething( T value )
+	{
+
+	}
+}
+
+[Expose]
+public class ConstraintBreaker3 : IConstraintBreaker3<ConstraintBreaker3>
+{
+	public void DoSomething( ConstraintBreaker3 value )
 	{
 
 	}

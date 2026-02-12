@@ -16,7 +16,7 @@ using System.Threading;
 [Icon( "grid_view" )]
 [EditorHandle( "materials/gizmo/lpv.png" )]
 [Alias( "DDGIVolume" )]
-public sealed partial class IndirectLightVolume : Component, Component.ExecuteInEditor
+public sealed partial class IndirectLightVolume : Component, Component.ExecuteInEditor, Component.DontExecuteOnServer
 {
 	/// <summary>
 	/// Behavior when a probe is detected inside geometry.
@@ -119,6 +119,7 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		base.OnEnabled();
 		Transform.OnTransformChanged += OnDirty;
 
+		LoadProbesFromRelocationTexture();
 		OnDirty();
 	}
 
@@ -183,8 +184,8 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 			Graphics.FlushGPU();
 
 			IrradianceTexture = SaveTexture( updater.GeneratedIrradianceTexture, "Irradiance" );
-			DistanceTexture = SaveTexture( updater.GeneratedDistanceTexture, "Distance", uncompressed: true );
-			RelocationTexture = SaveTexture( GeneratedRelocationTexture, "Relocation", uncompressed: true );
+			DistanceTexture = SaveTexture( updater.GeneratedDistanceTexture, "Distance", ImageFormat.RG1616F ); // BC6H ideally, but block compression fucks precision too much
+			RelocationTexture = SaveTexture( GeneratedRelocationTexture, "Relocation", ImageFormat.RGBA16161616F );
 		}
 
 		Scene.Get<DDGIVolumeSystem>()?.MarkDirty();
@@ -199,16 +200,32 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		if ( Scene is null )
 			return;
 
-		WorldPosition = Vector3.Zero;
-		var sceneBounds = new BBox();
+		WorldScale = 1;
+		WorldRotation = Rotation.Identity;
+		var sceneBounds = BBox.FromPositionAndSize( WorldPosition );
 
-		foreach ( var obj in Scene.SceneWorld.SceneObjects )
+		foreach ( var renderer in Scene.GetAll<Renderer>() )
 		{
-			if ( obj.Bounds.Volume > 10000000 ) // Skip skybox
+			if ( renderer is not IHasBounds bounds )
 				continue;
-
-			sceneBounds = sceneBounds.AddBBox( obj.Bounds );
+			sceneBounds = sceneBounds.AddBBox( bounds.LocalBounds.Transform( renderer.WorldTransform ) );
 		}
+		foreach ( var terrain in Scene.GetAll<Terrain>() )
+		{
+			var collision = terrain.EnableCollision; // isnt great but poking around in the heightmap is worse
+			terrain.EnableCollision = true;
+			sceneBounds = sceneBounds.AddBBox( terrain.GetWorldBounds() );
+			if ( !collision )
+				terrain.EnableCollision = false;
+		}
+		foreach ( var mesh in Scene.GetAll<MeshComponent>() )
+		{
+			var model = mesh.Model;
+			if ( model is null )
+				continue;
+			sceneBounds = sceneBounds.AddBBox( model.RenderBounds.Transform( mesh.WorldTransform ) );
+		}
+		sceneBounds = sceneBounds.Translate( -WorldPosition ).Grow( 16 );
 
 		Bounds = sceneBounds;
 	}
@@ -238,7 +255,7 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 	/// <summary>
 	/// Saves texture to disk and reloads it.
 	/// </summary>
-	private Texture SaveTexture( Texture source, string suffix, bool uncompressed = false )
+	private Texture SaveTexture( Texture source, string suffix, ImageFormat? format = null )
 	{
 		if ( source is null || source.IsError )
 			return source;
@@ -249,7 +266,7 @@ public sealed partial class IndirectLightVolume : Component, Component.ExecuteIn
 		var sceneFolder = Scene.Editor.GetSceneFolder();
 		var filename = $"/ddgi/{GameObject?.Name ?? "DDGIVolume"}_{suffix}_{Id}.vtex_c";
 
-		var vtexBytes = source.SaveToVtex( uncompressed );
+		var vtexBytes = source.SaveToVtex( format );
 		var path = sceneFolder.WriteFile( filename, vtexBytes );
 
 		var saved = Texture.Load( path );

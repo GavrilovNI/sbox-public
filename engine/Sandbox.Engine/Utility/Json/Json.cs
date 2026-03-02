@@ -42,6 +42,7 @@ public static partial class Json
 		options.Converters.Add( new BinaryConvert() );
 		options.Converters.Add( new JsonConvertFactory() );
 		options.Converters.Add( new MovieResourceConverter() );
+		options.Converters.Add( new AnyOfTypeConverterFactory() );
 		options.Converters.Add( new InterfaceConverterFactory() );
 
 		if ( typeLibrary is not null )
@@ -75,6 +76,14 @@ public static partial class Json
 	public static T Deserialize<T>( string source )
 	{
 		return JsonSerializer.Deserialize<T>( source, options );
+	}
+
+	/// <summary>
+	/// Deserialize from a Utf8JsonReader to given type, using our engine specific options.
+	/// </summary>
+	public static T Deserialize<T>( ref Utf8JsonReader reader )
+	{
+		return JsonSerializer.Deserialize<T>( ref reader, options );
 	}
 
 	/// <summary>
@@ -122,6 +131,14 @@ public static partial class Json
 			return null;
 
 		return JsonSerializer.Serialize( source, options );
+	}
+
+	/// <summary>
+	/// Serialize to a Utf8JsonWriter using our engine specific options.
+	/// </summary>
+	public static void Serialize<T>( Utf8JsonWriter writer, T target )
+	{
+		JsonSerializer.Serialize( writer, target, options );
 	}
 
 	/// <summary>

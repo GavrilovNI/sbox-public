@@ -1155,6 +1155,11 @@ public sealed partial class PhysicsBody : IHandle
 		{
 			World?.OnBodyOutOfBounds?.Invoke( this );
 		}
+
+		if ( fellAsleep )
+		{
+			World?.OnBodyFellAsleep?.Invoke( this );
+		}
 	}
 
 	/// <summary>

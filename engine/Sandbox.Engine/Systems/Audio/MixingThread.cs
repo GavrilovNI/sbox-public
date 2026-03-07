@@ -114,7 +114,7 @@ static class MixingThread
 	/// </summary>
 	static void SampleVoices( List<SoundHandle> voices )
 	{
-		using var scope = _sampleVoices.Start( $"{voices.Count()}" );
+		using var scope = _sampleVoices.Start();
 
 		System.Threading.Tasks.Parallel.ForEach( voices, voice =>
 		{

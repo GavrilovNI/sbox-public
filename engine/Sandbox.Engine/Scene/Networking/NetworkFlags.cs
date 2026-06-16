@@ -31,5 +31,10 @@ public enum NetworkFlags
 	/// <summary>
 	/// Disable synchronization for the entire transform of this networked object.
 	/// </summary>
-	NoTransformSync = NoPositionSync | NoRotationSync | NoScaleSync
+	NoTransformSync = NoPositionSync | NoRotationSync | NoScaleSync,
+
+	/// <summary>
+	/// Enable client-side prediction for this networked object's transform. Only applies on the network root object.
+	/// </summary>
+	PredictTransform = 16
 }

@@ -631,4 +631,195 @@ public class NetworkTest
 	{
 		[Sync] public int SyncInt { get; set; }
 	}
+
+	private class PredictedTestComponent : Component
+	{
+		[Sync( SyncFlags.Predicted )] public int PredictedInt { get; set; }
+	}
+
+	[TestMethod]
+	public void ShouldSimulateMatrix()
+	{
+		using var scope = new Scene().Push();
+		using var clientAndHost = new ClientAndHost( TypeLibrary );
+
+		clientAndHost.BecomeClient();
+
+		var nonPredicted = new GameObject();
+		nonPredicted.NetworkSpawn();
+
+		Assert.IsTrue( nonPredicted.Network.ShouldSimulate );
+		Assert.IsFalse( nonPredicted.Network.IsProxy );
+
+		var predicted = new GameObject();
+		predicted.Components.Create<PredictedTestComponent>();
+		predicted.NetworkSpawn();
+
+		Assert.IsTrue( predicted.Network.ShouldSimulate );
+
+		clientAndHost.BecomeHost();
+
+		Assert.IsFalse( nonPredicted.Network.ShouldSimulate );
+		Assert.IsTrue( nonPredicted.Network.IsProxy );
+
+		Assert.IsTrue( predicted.Network.ShouldSimulate );
+		Assert.IsTrue( predicted.Network.IsProxy );
+	}
+
+	[TestMethod]
+	public void UserCommandIncludesAnalogInput()
+	{
+		using var scope = new Scene().Push();
+		using var clientAndHost = new ClientAndHost( TypeLibrary );
+
+		clientAndHost.BecomeClient();
+
+		var inputSettings = new InputSettings();
+		inputSettings.InitDefault();
+		Input.InputSettings = inputSettings;
+		Input.AnalogMove = new Vector3( 1f, 0f, 0f );
+		Input.AnalogLook = new Angles( 10f, 20f, 0f );
+
+		Game.ActiveScene.SendClientTick( SceneNetworkSystem.Instance );
+
+		clientAndHost.BecomeHost();
+
+		clientAndHost.Host.ProcessMessages( InternalMessageType.ClientTick, bs =>
+		{
+			Networking.System.OnReceiveClientTick( bs, clientAndHost.Client );
+		} );
+
+		Assert.AreEqual( new Vector3( 1f, 0f, 0f ), clientAndHost.Client.Input.AnalogMove );
+		Assert.AreEqual( new Angles( 10f, 20f, 0f ), clientAndHost.Client.Input.AnalogLook );
+	}
+
+	[TestMethod]
+	public void SimulationInputScopeUsesOwnerInputOnHost()
+	{
+		using var scope = new Scene().Push();
+		using var clientAndHost = new ClientAndHost( TypeLibrary );
+
+		clientAndHost.BecomeClient();
+
+		var inputSettings = new InputSettings();
+		inputSettings.InitDefault();
+		Input.InputSettings = inputSettings;
+
+		var go = new GameObject();
+		go.Components.Create<PredictedTestComponent>();
+		go.NetworkSpawn();
+
+		Input.SetAction( "Jump", true );
+		Input.AnalogMove = new Vector3( 1f, 0f, 0f );
+		Input.AnalogLook = new Angles( 5f, 10f, 0f );
+
+		Game.ActiveScene.SendClientTick( SceneNetworkSystem.Instance );
+
+		clientAndHost.BecomeHost();
+
+		clientAndHost.Host.ProcessMessages( InternalMessageType.ClientTick, bs =>
+		{
+			Networking.System.OnReceiveClientTick( bs, clientAndHost.Client );
+		} );
+
+		Input.SetAction( "Jump", false );
+		Input.AnalogMove = Vector3.Zero;
+		Input.AnalogLook = default;
+
+		using ( go.Network.SimulationInputScope() )
+		{
+			Assert.AreEqual( true, Input.Down( "Jump" ) );
+			Assert.AreEqual( new Vector3( 1f, 0f, 0f ), Input.AnalogMove );
+			Assert.AreEqual( new Angles( 5f, 10f, 0f ), Input.AnalogLook );
+		}
+
+		Assert.AreEqual( false, Input.Down( "Jump" ) );
+		Assert.AreEqual( Vector3.Zero, Input.AnalogMove );
+	}
+
+	[TestMethod]
+	public void PredictedOwnerWriteUpdatesLocally()
+	{
+		using var scope = new Scene().Push();
+		using var clientAndHost = new ClientAndHost( TypeLibrary );
+
+		clientAndHost.BecomeClient();
+
+		var go = new GameObject();
+		var component = go.Components.Create<PredictedTestComponent>();
+		go.NetworkSpawn();
+
+		component.PredictedInt = 42;
+
+		Assert.AreEqual( 42, component.PredictedInt );
+		Assert.IsTrue( go._net.HasPrediction );
+	}
+
+	[TestMethod]
+	public void HostDirectPredictedWriteClearsHistory()
+	{
+		using var scope = new Scene().Push();
+		using var clientAndHost = new ClientAndHost( TypeLibrary );
+
+		clientAndHost.BecomeClient();
+
+		var go = new GameObject();
+		var component = go.Components.Create<PredictedTestComponent>();
+		go.NetworkSpawn();
+
+		component.PredictedInt = 10;
+
+		clientAndHost.BecomeHost();
+
+		component.PredictedInt = 99;
+
+		Assert.AreEqual( 99, component.PredictedInt );
+	}
+
+	[TestMethod]
+	public void OwnershipChangeClearsPredictionHistory()
+	{
+		using var scope = new Scene().Push();
+
+		var system = new NetworkSystem( "server", TypeLibrary );
+		system.InitializeHost();
+		Networking.System = system;
+		system.GameSystem = new SceneNetworkSystem( TypeLibrary, system );
+
+		var owner = new MockConnection( Guid.NewGuid() );
+		var newOwner = new MockConnection( Guid.NewGuid() );
+		Connection.Local = owner;
+
+		var go = new GameObject();
+		var component = go.Components.Create<PredictedTestComponent>();
+		go.NetworkSpawn( owner );
+
+		component.PredictedInt = 7;
+
+		go.Network.AssignOwnership( newOwner );
+
+		Connection.Local = newOwner;
+
+		component.PredictedInt = 3;
+		Assert.AreEqual( 3, component.PredictedInt );
+	}
+
+	[TestMethod]
+	public void ListenHostPlayerHasNoPredictionOverlay()
+	{
+		using var scope = new Scene().Push();
+		using var clientAndHost = new ClientAndHost( TypeLibrary );
+
+		clientAndHost.BecomeHost();
+
+		var go = new GameObject();
+		var component = go.Components.Create<PredictedTestComponent>();
+		go.NetworkSpawn();
+
+		component.PredictedInt = 55;
+
+		Assert.IsTrue( go.Network.ShouldSimulate );
+		Assert.IsFalse( go.Network.IsProxy );
+		Assert.IsTrue( go._net.HasPrediction );
+	}
 }

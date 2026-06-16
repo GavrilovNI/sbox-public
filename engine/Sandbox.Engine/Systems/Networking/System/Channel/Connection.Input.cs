@@ -8,6 +8,8 @@ public abstract partial class Connection
 	internal void BuildUserCommand( ref UserCommand cmd )
 	{
 		cmd.Actions = Sandbox.Input.Actions;
+		cmd.AnalogMove = Sandbox.Input.AnalogMove;
+		cmd.AnalogLook = Sandbox.Input.AnalogLook;
 	}
 
 	/// <summary>
@@ -53,6 +55,11 @@ public abstract partial class Connection
 
 		public ulong Actions;
 
+		public Vector3 AnalogMove;
+		public Angles AnalogLook;
+
+		public uint LastCommandNumber => _lastUserCommand.CommandNumber;
+
 		private Context _fixedUpdateContext;
 		private Context _updateContext;
 
@@ -86,6 +93,8 @@ public abstract partial class Connection
 			}
 
 			Actions = cmd.Actions;
+			AnalogMove = cmd.AnalogMove;
+			AnalogLook = cmd.AnalogLook;
 
 			_lastUserCommand = cmd;
 		}
@@ -103,6 +112,8 @@ public abstract partial class Connection
 		public void Clear()
 		{
 			_lastUserCommand = default;
+			AnalogMove = default;
+			AnalogLook = default;
 		}
 	}
 

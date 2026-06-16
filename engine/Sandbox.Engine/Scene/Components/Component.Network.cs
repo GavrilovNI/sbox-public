@@ -61,6 +61,12 @@ public abstract partial class Component
 				return;
 			}
 
+			if ( net.dataTable.TryGetEntry( slot, out var entry ) && entry.IsPredicted )
+			{
+				if ( net.TryHandlePredictedSet( slot, p.Value, p.Setter, entry ) )
+					return;
+			}
+
 			if ( !net.dataTable.HasControl( slot ) )
 			{
 				if ( !NetworkTable.IsReadingChanges )

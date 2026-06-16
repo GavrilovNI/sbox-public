@@ -100,8 +100,8 @@ internal sealed partial class NetworkObject : IValid, IDeltaSnapshot
 
 	internal void OnHotload()
 	{
-		// Build the network table again as properties may have changed.
 		CreateDataTable();
+		RecalculateHasPrediction();
 	}
 
 	internal NetworkObject( GameObject source )
@@ -133,6 +133,8 @@ internal sealed partial class NetworkObject : IValid, IDeltaSnapshot
 		}
 
 		CreateDataTable();
+
+		RecalculateHasPrediction();
 
 		// Keep track of us
 		GameObject.Scene.RegisterNetworkedObject( this );
@@ -605,9 +607,15 @@ internal sealed partial class NetworkObject : IValid, IDeltaSnapshot
 			LocalSnapshotState.AddCached( _snapshotCache, SnapshotInterpolationSlot, _clearInterpolationFlag );
 			LocalSnapshotState.AddCached( _snapshotCache, SnapshotEnabledSlot, GameObject.Enabled );
 		}
+		else if ( Networking.IsHost && HasPredictTransform )
+		{
+			WriteSnapshotTransform( LocalSnapshotState, flags );
+		}
 
+		PredictionContext.CurrentNetworkObject = this;
 		dataTable.QueryValues();
 		dataTable.WriteSnapshotState( LocalSnapshotState );
+		PredictionContext.CurrentNetworkObject = null;
 
 		_clearInterpolationFlag = false;
 
@@ -784,53 +792,29 @@ internal sealed partial class NetworkObject : IValid, IDeltaSnapshot
 
 	bool IDeltaSnapshot.OnSnapshot( Connection source, DeltaSnapshot snapshot )
 	{
-		// Don't process this if the source connection does not have control, and they
-		// are not the host.
 		if ( !HasControl( source ) && !source.IsHost )
 			return false;
 
-		// Conna: only what we regard as the owner can modify this shit.
-		if ( HasControl( source ) )
+		PredictionContext.CurrentNetworkObject = this;
+
+		try
 		{
-			snapshot.TryGetValue<bool>( SnapshotInterpolationSlot, out var clearInterpolation );
-
-			var didTransformChange = false;
-			var transform = GameObject.Transform.TargetLocal;
-
-			if ( snapshot.TryGetValue<Vector3>( SnapshotPositionSlot, out var position ) )
+			if ( HasPrediction )
 			{
-				didTransformChange = true;
-				transform.Position = position;
+				if ( !OnSnapshotPrediction( source, snapshot ) && HasControl( source ) )
+					ApplyControlTransform( snapshot );
+			}
+			else if ( HasControl( source ) )
+			{
+				ApplyControlTransform( snapshot );
 			}
 
-			if ( snapshot.TryGetValue<Rotation>( SnapshotRotationSlot, out var rotation ) )
-			{
-				didTransformChange = true;
-				transform.Rotation = rotation;
-			}
-
-			if ( snapshot.TryGetValue<Vector3>( SnapshotScaleSlot, out var scale ) )
-			{
-				didTransformChange = true;
-				transform.Scale = scale;
-			}
-
-			if ( didTransformChange )
-			{
-				GameObject.Transform.FromNetwork( transform, clearInterpolation );
-			}
-			else if ( clearInterpolation )
-			{
-				GameObject.Transform.ClearLocalInterpolation();
-			}
-
-			if ( snapshot.TryGetValue<bool>( SnapshotEnabledSlot, out var enabled ) )
-			{
-				GameObject.Enabled = enabled;
-			}
+			dataTable.ReadSnapshot( source, snapshot );
 		}
-
-		dataTable.ReadSnapshot( source, snapshot );
+		finally
+		{
+			PredictionContext.CurrentNetworkObject = null;
+		}
 
 		return true;
 	}
@@ -877,6 +861,8 @@ internal sealed partial class NetworkObject : IValid, IDeltaSnapshot
 		system?.DeltaSnapshots.ClearNetworkObject( this );
 
 		LocalSnapshotState.ClearConnections();
+
+		ClearPredictionHistory();
 
 		if ( !isOwner )
 			return;

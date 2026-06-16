@@ -47,7 +47,16 @@ public static partial class Input
 	[ActionGraphNode( "input.analog.look" ), Category( "Input" ), Icon( "gamepad" )]
 	public static Angles AnalogLook
 	{
-		get => Suppressed ? default : _analogLook;
+		get
+		{
+			if ( Suppressed )
+				return default;
+
+			if ( SimulationInputConnection is not null )
+				return SimulationInputConnection.Input.AnalogLook;
+
+			return _analogLook;
+		}
 		set => _analogLook = value;
 	}
 
@@ -59,7 +68,16 @@ public static partial class Input
 	[ActionGraphNode( "input.analog.move" ), Category( "Input" ), Icon( "gamepad" )]
 	public static Vector3 AnalogMove
 	{
-		get => Suppressed ? default : _analogMove;
+		get
+		{
+			if ( Suppressed )
+				return default;
+
+			if ( SimulationInputConnection is not null )
+				return SimulationInputConnection.Input.AnalogMove;
+
+			return _analogMove;
+		}
 		set => _analogMove = value;
 	}
 

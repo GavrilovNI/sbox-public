@@ -21,5 +21,10 @@ public enum SyncFlags : uint
 	/// The value will be interpolated between ticks. This is currently only supported for <see cref="float"/>, <see cref="double"/>, <see cref="Angles"/>,
 	/// <see cref="Rotation"/>, <see cref="Transform"/>, <see cref="Vector3"/>.
 	/// </summary>
-	Interpolate = 4
+	Interpolate = 4,
+
+	/// <summary>
+	/// The host has authority over this value. The owner client applies writes immediately and the engine reconciles on mismatch.
+	/// </summary>
+	Predicted = 8
 }

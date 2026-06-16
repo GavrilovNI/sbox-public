@@ -285,7 +285,7 @@ public partial class GameObject : IJsonConvert, IComponentLister, BytePack.ISeri
 		if ( !IsValid )
 			return false;
 
-		return !IsNetworkRoot || !IsProxy;
+		return !IsNetworkRoot || !IsProxy || (Networking.IsHost && _net?.HasPrediction == true);
 	}
 
 	/// <summary>

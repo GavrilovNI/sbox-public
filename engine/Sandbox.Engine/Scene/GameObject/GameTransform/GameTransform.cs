@@ -245,6 +245,7 @@ public partial class GameTransform
 		if ( Proxy is not null )
 		{
 			Proxy.SetWorldTransform( value );
+			NotifyNetworkTransformChanged();
 			return;
 		}
 
@@ -253,11 +254,20 @@ public partial class GameTransform
 		if ( !IsFollowingParent() )
 		{
 			SetLocalTransform( value, interpolate );
+			NotifyNetworkTransformChanged();
 			return;
 		}
 
 		var localTransform = GameObject.Parent.WorldTransform.ToLocal( value );
 		SetLocalTransform( localTransform, interpolate );
+
+		NotifyNetworkTransformChanged();
+	}
+
+	void NotifyNetworkTransformChanged()
+	{
+		var root = GameObject?.FindNetworkRoot();
+		root?._net?.OnTransformWritten();
 	}
 
 	/// <summary>

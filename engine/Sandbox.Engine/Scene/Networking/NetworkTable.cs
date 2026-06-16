@@ -3,7 +3,7 @@ using Sandbox;
 
 namespace Sandbox.Network;
 
-internal class NetworkTable : IDisposable
+internal partial class NetworkTable : IDisposable
 {
 	/// <summary>
 	/// Internal flag set while reading changes. Useful when you want to force
@@ -27,6 +27,7 @@ internal class NetworkTable : IDisposable
 		public bool IsDeltaSnapshotType;
 		public bool IsReliableType;
 		public bool IsDirty;
+		public bool IsPredicted;
 		public byte[] Serialized;
 		public bool Initialized;
 		public int Slot;
@@ -266,6 +267,13 @@ internal class NetworkTable : IDisposable
 	/// <param name="snapshot"></param>
 	internal void WriteSnapshotState( LocalSnapshotState snapshot )
 	{
+		var net = PredictionContext.CurrentNetworkObject;
+		if ( net is not null && net.HasPrediction )
+		{
+			WriteSnapshotStatePrediction( snapshot );
+			return;
+		}
+
 		var localConnection = Connection.Local;
 
 		for ( var i = 0; i < _snapshotEntries.Count; i++ )
@@ -312,6 +320,13 @@ internal class NetworkTable : IDisposable
 	/// <param name="snapshot"></param>
 	internal void ReadSnapshot( Connection source, DeltaSnapshot snapshot )
 	{
+		var net = PredictionContext.CurrentNetworkObject;
+		if ( net is not null && net.HasPrediction )
+		{
+			ReadSnapshotPrediction( source, snapshot );
+			return;
+		}
+
 		foreach ( var entry in _snapshotEntries )
 		{
 			if ( !entry.IsDeltaSnapshotType )

@@ -421,6 +421,12 @@ public partial class GameObject
 			return;
 		}
 
+		if ( net.dataTable.TryGetEntry( slot, out var entry ) && entry.IsPredicted )
+		{
+			if ( net.TryHandlePredictedSet( slot, p.Value, p.Setter, entry ) )
+				return;
+		}
+
 		if ( !net.dataTable.HasControl( slot ) )
 		{
 			if ( NetworkTable.IsReadingChanges )
@@ -593,6 +599,22 @@ public partial class GameObject
 		public bool IsProxy => go._net?.IsProxy ?? false;
 
 		/// <summary>
+		/// True if this machine should run simulation logic for this object.
+		/// Non-predicted: equivalent to !IsProxy.
+		/// Predicted: also true on host for client-owned objects.
+		/// </summary>
+		public bool ShouldSimulate => !IsProxy || (Networking.IsHost && HasPrediction );
+
+		internal bool HasPrediction => go.FindNetworkRoot()?._net?.HasPrediction ?? false;
+
+		/// <summary>
+		/// For the duration of the scope, Input.Down/Pressed/Released, AnalogMove,
+		/// and AnalogLook read from the connection that owns this simulation
+		/// (owner client on host, Connection.Local on owner client). No-op when not needed.
+		/// </summary>
+		public IDisposable SimulationInputScope() => new SimulationInputScopeImpl( go );
+
+		/// <summary>
 		/// Try to get the connection that owns this object. This can and will return null
 		/// if we don't have information for this connection.
 		/// </summary>
@@ -628,7 +650,11 @@ public partial class GameObject
 		public NetworkFlags Flags
 		{
 			get => go.NetworkFlags;
-			set => go.NetworkFlags = value;
+			set
+			{
+				go.NetworkFlags = value;
+				go._net?.RecalculateHasPrediction();
+			}
 		}
 
 		/// <summary>
@@ -745,6 +771,7 @@ public partial class GameObject
 			}
 
 			go._net?.RegisterPropertiesRecursive();
+			go._net?.RecalculateHasPrediction();
 			go._net?.SendNetworkRefresh();
 		}
 
@@ -766,6 +793,7 @@ public partial class GameObject
 			}
 
 			go._net?.RegisterPropertiesRecursive();
+			go._net?.RecalculateHasPrediction();
 			go._net?.SendNetworkRefresh( descendent );
 		}
 
@@ -786,6 +814,7 @@ public partial class GameObject
 			}
 
 			go._net?.RegisterPropertiesRecursive();
+			go._net?.RecalculateHasPrediction();
 			go._net?.SendNetworkRefresh( component );
 		}
 

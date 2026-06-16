@@ -12,12 +12,18 @@ public static partial class Input
 
 	internal static ulong Actions
 	{
-		get => CurrentPlayerScope switch
+		get
 		{
-			0 => CurrentContext.ActionsCurrent,
-			> 0 => CurrentController?.InputContext?.ActionsCurrent ?? 0,
-			_ => CurrentContext.ActionsCurrent | (Controller.First?.InputContext?.ActionsCurrent ?? 0)
-		};
+			if ( SimulationInputConnection is not null )
+				return SimulationInputConnection.Input.Actions;
+
+			return CurrentPlayerScope switch
+			{
+				0 => CurrentContext.ActionsCurrent,
+				> 0 => CurrentController?.InputContext?.ActionsCurrent ?? 0,
+				_ => CurrentContext.ActionsCurrent | (Controller.First?.InputContext?.ActionsCurrent ?? 0)
+			};
+		}
 		set => CurrentContext.ActionsCurrent = value;
 	}
 
@@ -74,6 +80,9 @@ public static partial class Input
 		if ( Suppressed ) return false;
 		if ( string.IsNullOrWhiteSpace( action ) ) return false;
 
+		if ( SimulationInputConnection is not null )
+			return SimulationInputConnection.Down( action );
+
 		var index = GetActionIndex( action );
 		if ( index == -1 )
 		{
@@ -109,6 +118,10 @@ public static partial class Input
 	{
 		if ( Application.IsHeadless ) return false;
 		if ( Suppressed ) return false;
+
+		if ( SimulationInputConnection is not null )
+			return SimulationInputConnection.Pressed( action );
+
 		return !WasDownLastCommand( action ) && Down( action );
 	}
 
@@ -120,6 +133,10 @@ public static partial class Input
 	{
 		if ( Application.IsHeadless ) return false;
 		if ( Suppressed ) return false;
+
+		if ( SimulationInputConnection is not null )
+			return SimulationInputConnection.Released( action );
+
 		return WasDownLastCommand( action ) && !Down( action );
 	}
 

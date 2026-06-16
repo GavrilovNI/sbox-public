@@ -71,6 +71,8 @@ namespace Sandbox.Generator
 
 			foreach ( var attribute in attributes )
 			{
+				ValidateSyncAttribute( attribute, symbol, master, node );
+
 				foreach ( var cg in GetCodeGeneratorAttributes( attribute ) )
 				{
 					var type = (Flags)int.Parse( cg.GetArgumentValue( 0, "Type", "0" ) );
@@ -1188,6 +1190,42 @@ namespace Sandbox.Generator
 			}
 
 			return false;
+		}
+
+		private static void ValidateSyncAttribute( AttributeData attribute, IPropertySymbol symbol, Worker master, PropertyDeclarationSyntax node )
+		{
+			if ( attribute.AttributeClass?.Name is not "SyncAttribute" )
+				return;
+
+			var flags = GetSyncFlags( attribute );
+			const uint fromHost = 1;
+			const uint predicted = 8;
+
+			if ( (flags & fromHost) != 0 && (flags & predicted) != 0 )
+			{
+				master.AddError( node.GetLocation(),
+					"[Sync] cannot combine FromHost and Predicted on the same property." );
+			}
+
+			if ( (flags & predicted) != 0 && symbol.ContainingType.DerivesFrom( "global::Sandbox.GameObjectSystem" ) )
+			{
+				master.AddError( node.GetLocation(),
+					"[Sync(Predicted)] is not supported on GameObjectSystem. Use [Sync(FromHost)] instead." );
+			}
+		}
+
+		private static uint GetSyncFlags( AttributeData attribute )
+		{
+			foreach ( var arg in attribute.NamedArguments )
+			{
+				if ( arg.Key == "Flags" && arg.Value.Value is int flags )
+					return (uint)flags;
+			}
+
+			if ( attribute.ConstructorArguments.Length > 0 && attribute.ConstructorArguments[0].Value is int ctorFlags )
+				return (uint)ctorFlags;
+
+			return 0;
 		}
 
 		private static bool IsCodeGeneratorAttribute( AttributeData attribute )

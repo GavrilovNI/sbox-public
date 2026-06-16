@@ -18,12 +18,24 @@ internal struct UserCommand( uint commandNumber )
 	public ulong Actions;
 
 	/// <summary>
+	/// Owner's analog move at the last network tick.
+	/// </summary>
+	public Vector3 AnalogMove;
+
+	/// <summary>
+	/// Owner's analog look at the last network tick.
+	/// </summary>
+	public Angles AnalogLook;
+
+	/// <summary>
 	/// Serialize this <see cref="UserCommand"/> to the specified <see cref="ByteStream"/>.
 	/// </summary>
 	internal void Serialize( ref ByteStream bs )
 	{
 		bs.Write( CommandNumber );
 		bs.Write( Actions );
+		bs.Write( AnalogMove );
+		bs.Write( AnalogLook );
 	}
 
 	/// <summary>
@@ -33,6 +45,12 @@ internal struct UserCommand( uint commandNumber )
 	{
 		CommandNumber = bs.Read<uint>();
 		Actions = bs.Read<ulong>();
+
+		if ( bs.ReadRemaining > 0 )
+		{
+			AnalogMove = bs.Read<Vector3>();
+			AnalogLook = bs.Read<Angles>();
+		}
 	}
 
 	/// <summary>

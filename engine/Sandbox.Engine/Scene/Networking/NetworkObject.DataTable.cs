@@ -47,11 +47,10 @@ internal sealed partial class NetworkObject
 		foreach ( var child in go.Children )
 		{
 			if ( child.NetworkMode != NetworkMode.Snapshot ) continue;
-			// Conna: pass false here so that we don't add properties from child GameObjects. We only
-			// want to add properties from components on child GameObjects. This is because we don't
-			// want to add potentially hundreds of entries for OwnerTransfer, etc.
 			RegisterPropertiesRecursive( child, false );
 		}
+
+		RecalculateHasPrediction();
 	}
 
 	internal void RegisterProperties( object instance, Guid guid )
@@ -61,8 +60,17 @@ internal sealed partial class NetworkObject
 		// Register all our Sync properties with the data table.
 		foreach ( var propertyAndAttribute in ReflectionQueryCache.SyncProperties( type ) )
 		{
-			var isHostSync = propertyAndAttribute.Attribute.Flags.HasFlag( SyncFlags.FromHost );
-			var isQuery = propertyAndAttribute.Attribute.Flags.HasFlag( SyncFlags.Query );
+			var flags = propertyAndAttribute.Attribute.Flags;
+
+			if ( flags.HasFlag( SyncFlags.FromHost ) && flags.HasFlag( SyncFlags.Predicted ) )
+			{
+				Log.Warning( $"[Sync] cannot combine FromHost and Predicted on {type.Name}.{propertyAndAttribute.Property.Name}" );
+				continue;
+			}
+
+			var isPredicted = flags.HasFlag( SyncFlags.Predicted );
+			var isHostSync = isPredicted || flags.HasFlag( SyncFlags.FromHost );
+			var isQuery = flags.HasFlag( SyncFlags.Query );
 
 			try
 			{
@@ -76,6 +84,7 @@ internal sealed partial class NetworkObject
 					GetValue = () => propertyAndAttribute.Property.GetValue( instance ),
 					SetValue = ( v ) => propertyAndAttribute.Property?.SetValue( instance, v ),
 					NeedsQuery = isQuery,
+					IsPredicted = isPredicted,
 					DebugName = $"{originType.Name}.{propertyAndAttribute.Property.Name}"
 				};
 

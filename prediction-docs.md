@@ -23,6 +23,9 @@ public sealed class PredictedPlayer : Component
 
 	void SimulateMovement()
 	{
+		if ( Input.Pressed( "Jump" ) && controller.IsOnGround )
+			controller.Punch( Vector3.Up * JumpSpeed );
+
 		Velocity = Accelerate( WishVelocity );
 		WorldPosition += Velocity * Time.Delta;
 	}
@@ -109,9 +112,9 @@ protected override void OnFixedUpdate()
 
 ## Input: `Network.SimulationInputScope()`
 
-On the **host**, `Input.Down`, `Input.AnalogMove`, and `Input.AnalogLook` normally read **local** input. For client-owned predicted pawns the host must simulate with the **owner's** input.
+Simulation input is sampled **once per fixed update** on the owner client and replayed on the host at the same cadence. This keeps `Input.Pressed`, `Input.Released`, `Input.AnalogMove`, and `Input.AnalogLook` aligned between owner prediction and host authority.
 
-Wrap simulation code in `SimulationInputScope()`:
+Wrap all sim code that reads `Input.*` in `SimulationInputScope()`:
 
 ```csharp
 using ( Network.SimulationInputScope() )
@@ -122,21 +125,32 @@ using ( Network.SimulationInputScope() )
 
 | Who runs sim | Scope behaviour |
 |--------------|-----------------|
-| Owner client | No-op — local `Input` is already correct |
-| Host simulating a client pawn | `Input.Down` / `Pressed` / `Released`, `AnalogMove`, `AnalogLook` read from the owner connection |
-| Listen-server host on own pawn | No-op — owner is local |
+| Owner client (predicting) | `Input.*` reads from the **local command stream** (same samples sent to the host) |
+| Host simulating a client pawn | `Input.*` reads from the **owner connection** command stream |
+| Listen-server host on own pawn | No-op — host is local authority |
 | Proxy client | N/A — `ShouldSimulate` is false |
+
+### Per fixed update (engine, automatic)
+
+| Step | Owner client | Host |
+|------|-------------|------|
+| Start of `FixedUpdate` | Build `UserCommand`, apply locally, send to host | Consume one queued `UserCommand` per remote connection |
+| Sim in scope | `Input.*` from command stream | `Input.*` from owner command stream |
+
+`ClientTick` at network rate only updates visibility — input is **not** sent there.
 
 ### What is redirected inside the scope
 
-| Input | Owner client | Host (via scope) |
-|-------|-------------|------------------|
-| `Input.Down` / `Pressed` / `Released` | Local, per frame | Owner's held actions from latest network tick |
-| `Input.AnalogMove` | Local, per frame | Owner's `AnalogMove` from latest network tick |
-| `Input.AnalogLook` | Local, per frame | Owner's `AnalogLook` from latest network tick |
+| Input | Owner client (predicting) | Host (via scope) |
+|-------|--------------------------|------------------|
+| `Input.Down` / `Pressed` / `Released` | Local command stream | Owner command stream |
+| `Input.AnalogMove` | Per fixed step | Owner per fixed step |
+| `Input.AnalogLook` | Per fixed step | Owner per fixed step |
 | `Input.MouseDelta` | Local | **Not redirected** — use `AnalogLook` in sim code |
 
-Input outside the scope is always **local machine** input. The engine does not silently redirect global `Input.*`.
+Use `Input.Pressed` and `Input.Released` in sim code — no custom edge tracking needed.
+
+Input outside the scope is always **local machine** input (UI, menus, debug). The engine does not silently redirect global `Input.*`.
 
 ### Explicit owner input (no scope)
 
@@ -159,12 +173,16 @@ WorldPosition += delta;
 
 The engine handles:
 
-- **Owner client (non-host):** apply immediately, keep a short history for replay after correction.
+- **Owner client (non-host):** apply immediately, keep a short history tagged by `UserCommand.CommandNumber` for replay after correction.
 - **Host:** authoritative simulation; writes are truth for all clients.
 - **Host knockback / teleport:** normal assignment on the host → immediate authoritative push to the owner (no warning log).
 - **Mismatch after sim:** host sends authoritative state → owner **reconciles** (apply, trim history, replay pending inputs). A `Log.Warning` is printed on the owner client for reconciliation only — not for host-initiated pushes.
 
 You do not call reconcile manually.
+
+### What not to predict
+
+Avoid `[Sync(Predicted)]` on values that integrate every frame but are not tied to command replay (e.g. `TimeSinceLastJump += Time.Delta`). Use a private `TimeSince` field instead, or derive from command-numbered events.
 
 ### Listen server
 
@@ -213,7 +231,7 @@ A single pawn can mix flags:
 [Sync(Predicted)]      → "I write immediately; server decides truth"
 PredictTransform       → "I move immediately; server decides position"
 ShouldSimulate         → "This machine should run sim logic for this object"
-SimulationInputScope   → "Input reads from the owner while the host sims"
+SimulationInputScope   → "Input reads from the per-fixed-step command stream"
 ```
 
 ---
@@ -224,8 +242,9 @@ SimulationInputScope   → "Input reads from the owner while the host sims"
 2. Mark sim-driven properties with `[Sync(Predicted)]`.
 3. Replace `if ( !IsProxy )` with `if ( !Network.ShouldSimulate )` in sim code.
 4. Wrap sim that uses `Input.*` in `using ( Network.SimulationInputScope() )`.
-5. Keep host-only gameplay (knockback, teleport, round rules) behind `Networking.IsHost` — assign predicted fields normally on the host.
-6. Do not implement manual rollback or correction.
+5. Use `Input.Pressed` / `Input.Released` / `Input.AnalogLook` inside the scope — they match host sim.
+6. Keep host-only gameplay (knockback, teleport, round rules) behind `Networking.IsHost` — assign predicted fields normally on the host.
+7. Do not implement manual rollback or correction.
 
 ---
 
@@ -236,3 +255,4 @@ SimulationInputScope   → "Input reads from the owner while the host sims"
 - No prediction on child `GameObject` snapshot fields (only components under the network object and root `GameObject` fields).
 - `Input.MouseDelta` is not redirected on the host — use `AnalogLook` in simulation code.
 - Raw `Input.*` outside `SimulationInputScope` always reads local input.
+- Integrating floats (`+= Time.Delta`) should not be `[Sync(Predicted)]` unless tied to deterministic command replay.

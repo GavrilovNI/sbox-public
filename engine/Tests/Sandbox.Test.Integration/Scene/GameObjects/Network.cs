@@ -106,16 +106,18 @@ public class NetworkTest
 		Input.InputSettings = inputSettings;
 		Input.SetAction( "Jump", true );
 
-		// Send a client tick - this will build a user command as well
-		Game.ActiveScene.SendClientTick( SceneNetworkSystem.Instance );
+		// Send a user command for this fixed update
+		Game.ActiveScene.SendFixedUpdateUserCommand( SceneNetworkSystem.Instance );
 
 		// Become the host
 		clientAndHost.BecomeHost();
 
-		clientAndHost.Host.ProcessMessages( InternalMessageType.ClientTick, bs =>
+		clientAndHost.Host.ProcessMessages( InternalMessageType.UserCommand, bs =>
 		{
-			Networking.System.OnReceiveClientTick( bs, clientAndHost.Client );
+			Networking.System.OnReceiveUserCommand( bs, clientAndHost.Client );
 		} );
+
+		Connection.ConsumeAllFixedUpdateUserCommands();
 
 		// Clear both sides so this tick can't be replayed by a later ProcessMessages call
 		clientAndHost.Client.Messages.Clear();
@@ -129,16 +131,18 @@ public class NetworkTest
 
 		Input.ClearActions();
 
-		// Send a client tick - this will build a user command as well
-		Game.ActiveScene.SendClientTick( SceneNetworkSystem.Instance );
+		// Send a user command for this fixed update
+		Game.ActiveScene.SendFixedUpdateUserCommand( SceneNetworkSystem.Instance );
 
 		// Become the host
 		clientAndHost.BecomeHost();
 
-		clientAndHost.Host.ProcessMessages( InternalMessageType.ClientTick, bs =>
+		clientAndHost.Host.ProcessMessages( InternalMessageType.UserCommand, bs =>
 		{
-			Networking.System.OnReceiveClientTick( bs, clientAndHost.Client );
+			Networking.System.OnReceiveUserCommand( bs, clientAndHost.Client );
 		} );
+
+		Connection.ConsumeAllFixedUpdateUserCommands();
 
 		// Clear both sides so this tick can't be replayed by a later ProcessMessages call
 		clientAndHost.Client.Messages.Clear();
@@ -160,16 +164,18 @@ public class NetworkTest
 		Assert.AreEqual( true, Connection.Local.Pressed( "Jump" ) );
 		Assert.AreEqual( true, Connection.Local.Down( "Jump" ) );
 
-		// Send a client tick - this will build a user command as well
-		Game.ActiveScene.SendClientTick( SceneNetworkSystem.Instance );
+		// Send a user command for this fixed update
+		Game.ActiveScene.SendFixedUpdateUserCommand( SceneNetworkSystem.Instance );
 
 		// Become the host
 		clientAndHost.BecomeHost();
 
-		clientAndHost.Host.ProcessMessages( InternalMessageType.ClientTick, bs =>
+		clientAndHost.Host.ProcessMessages( InternalMessageType.UserCommand, bs =>
 		{
-			Networking.System.OnReceiveClientTick( bs, clientAndHost.Client );
+			Networking.System.OnReceiveUserCommand( bs, clientAndHost.Client );
 		} );
+
+		Connection.ConsumeAllFixedUpdateUserCommands();
 
 		Assert.AreEqual( false, clientAndHost.Client.Pressed( "Forward" ) );
 		Assert.AreEqual( true, clientAndHost.Client.Pressed( "Jump" ) );
@@ -680,14 +686,16 @@ public class NetworkTest
 		Input.AnalogMove = new Vector3( 1f, 0f, 0f );
 		Input.AnalogLook = new Angles( 10f, 20f, 0f );
 
-		Game.ActiveScene.SendClientTick( SceneNetworkSystem.Instance );
+		Game.ActiveScene.SendFixedUpdateUserCommand( SceneNetworkSystem.Instance );
 
 		clientAndHost.BecomeHost();
 
-		clientAndHost.Host.ProcessMessages( InternalMessageType.ClientTick, bs =>
+		clientAndHost.Host.ProcessMessages( InternalMessageType.UserCommand, bs =>
 		{
-			Networking.System.OnReceiveClientTick( bs, clientAndHost.Client );
+			Networking.System.OnReceiveUserCommand( bs, clientAndHost.Client );
 		} );
+
+		Connection.ConsumeAllFixedUpdateUserCommands();
 
 		Assert.AreEqual( new Vector3( 1f, 0f, 0f ), clientAndHost.Client.Input.AnalogMove );
 		Assert.AreEqual( new Angles( 10f, 20f, 0f ), clientAndHost.Client.Input.AnalogLook );
@@ -713,14 +721,16 @@ public class NetworkTest
 		Input.AnalogMove = new Vector3( 1f, 0f, 0f );
 		Input.AnalogLook = new Angles( 5f, 10f, 0f );
 
-		Game.ActiveScene.SendClientTick( SceneNetworkSystem.Instance );
+		Game.ActiveScene.SendFixedUpdateUserCommand( SceneNetworkSystem.Instance );
 
 		clientAndHost.BecomeHost();
 
-		clientAndHost.Host.ProcessMessages( InternalMessageType.ClientTick, bs =>
+		clientAndHost.Host.ProcessMessages( InternalMessageType.UserCommand, bs =>
 		{
-			Networking.System.OnReceiveClientTick( bs, clientAndHost.Client );
+			Networking.System.OnReceiveUserCommand( bs, clientAndHost.Client );
 		} );
+
+		Connection.ConsumeAllFixedUpdateUserCommands();
 
 		Input.SetAction( "Jump", false );
 		Input.AnalogMove = Vector3.Zero;
@@ -735,6 +745,78 @@ public class NetworkTest
 
 		Assert.AreEqual( false, Input.Down( "Jump" ) );
 		Assert.AreEqual( Vector3.Zero, Input.AnalogMove );
+	}
+
+	[TestMethod]
+	public void PressedWorksOnHostViaSimulationInputScope()
+	{
+		using var scope = new Scene().Push();
+		using var clientAndHost = new ClientAndHost( TypeLibrary );
+
+		clientAndHost.BecomeClient();
+
+		var inputSettings = new InputSettings();
+		inputSettings.InitDefault();
+		Input.InputSettings = inputSettings;
+
+		var go = new GameObject();
+		go.Components.Create<PredictedTestComponent>();
+		go.NetworkSpawn();
+
+		Input.SetAction( "Jump", true );
+
+		Game.ActiveScene.SendFixedUpdateUserCommand( SceneNetworkSystem.Instance );
+
+		clientAndHost.BecomeHost();
+
+		clientAndHost.Host.ProcessMessages( InternalMessageType.UserCommand, bs =>
+		{
+			Networking.System.OnReceiveUserCommand( bs, clientAndHost.Client );
+		} );
+
+		Connection.ConsumeAllFixedUpdateUserCommands();
+
+		using ( go.Network.SimulationInputScope() )
+		{
+			Assert.AreEqual( true, Input.Pressed( "Jump" ) );
+			Assert.AreEqual( true, Input.Down( "Jump" ) );
+		}
+	}
+
+	[TestMethod]
+	public void OwnerPredictionUsesCommandStreamPressed()
+	{
+		using var scope = new Scene().Push();
+		using var clientAndHost = new ClientAndHost( TypeLibrary );
+
+		clientAndHost.BecomeClient();
+
+		var inputSettings = new InputSettings();
+		inputSettings.InitDefault();
+		Input.InputSettings = inputSettings;
+
+		var go = new GameObject();
+		go.Components.Create<PredictedTestComponent>();
+		go.NetworkSpawn();
+
+		Input.SetAction( "Jump", true );
+
+		Game.ActiveScene.SendFixedUpdateUserCommand( SceneNetworkSystem.Instance );
+
+		using ( go.Network.SimulationInputScope() )
+		{
+			Assert.AreEqual( true, Input.Pressed( "Jump" ) );
+			Assert.AreEqual( true, Input.Down( "Jump" ) );
+		}
+
+		Input.ClearActions();
+		Game.ActiveScene.SendFixedUpdateUserCommand( SceneNetworkSystem.Instance );
+
+		using ( go.Network.SimulationInputScope() )
+		{
+			Assert.AreEqual( true, Input.Released( "Jump" ) );
+			Assert.AreEqual( false, Input.Down( "Jump" ) );
+		}
 	}
 
 	[TestMethod]

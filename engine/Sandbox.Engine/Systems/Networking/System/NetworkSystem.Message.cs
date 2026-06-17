@@ -126,6 +126,12 @@ internal partial class NetworkSystem
 			return;
 		}
 
+		if ( type == InternalMessageType.UserCommand )
+		{
+			OnReceiveUserCommand( msg.Data, msg.Source );
+			return;
+		}
+
 		if ( type == InternalMessageType.SetCullState )
 		{
 			OnReceiveCullStateChange( msg.Data, msg.Source );
@@ -262,21 +268,18 @@ internal partial class NetworkSystem
 				}
 			}
 		}
+	}
 
-		// Read and apply the user command from this client
-		{
-			if ( data.ReadRemaining == 0 )
-				return;
+	internal void OnReceiveUserCommand( ByteStream data, Connection source )
+	{
+		NetworkDebugSystem.Current?.Record( NetworkDebugSystem.MessageType.UserCommands, data.Length );
 
-			// We should reject user commands from clients if we're not the host
-			if ( !Networking.IsHost )
-				return;
+		if ( !Networking.IsHost )
+			return;
 
-			// This is a user command directly from another client
-			UserCommand cmd = default;
-			cmd.Deserialize( ref data );
-			source.Input.ApplyUserCommand( cmd );
-		}
+		UserCommand cmd = default;
+		cmd.Deserialize( ref data );
+		source.QueueUserCommand( cmd );
 	}
 
 	private void OnHeartbeatPingMessage( ByteStream data, Connection source )

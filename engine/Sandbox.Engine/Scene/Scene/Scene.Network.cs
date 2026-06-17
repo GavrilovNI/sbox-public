@@ -122,32 +122,50 @@ public partial class Scene : GameObject
 
 		localConnection.VisibilityOrigins[0] = Camera?.WorldPosition ?? default;
 
-		var userCommand = UserCommand.Create();
-		localConnection.BuildUserCommand( ref userCommand );
-
 		foreach ( var connection in system.GetFilteredConnections() )
 		{
 			var msg = ByteStream.Create( 256 );
 			msg.Write( InternalMessageType.ClientTick );
 
-			// Broadcast our visibility origins to everyone
-			{
-				msg.Write( (char)localConnection.VisibilityOrigins.Length );
+			msg.Write( (char)localConnection.VisibilityOrigins.Length );
 
-				for ( var i = 0; i < localConnection.VisibilityOrigins.Length; i++ )
-				{
-					var source = localConnection.VisibilityOrigins[i];
-					msg.Write( source.x );
-					msg.Write( source.y );
-					msg.Write( source.z );
-				}
+			for ( var i = 0; i < localConnection.VisibilityOrigins.Length; i++ )
+			{
+				var source = localConnection.VisibilityOrigins[i];
+				msg.Write( source.x );
+				msg.Write( source.y );
+				msg.Write( source.z );
 			}
 
-			if ( connection.IsHost )
-			{
-				userCommand.Serialize( ref msg );
-			}
+			connection.SendStream( msg, NetFlags.UnreliableNoDelay );
+			msg.Dispose();
+		}
+	}
 
+	/// <summary>
+	/// Build, apply locally, and send a user command for this fixed update.
+	/// </summary>
+	internal void SendFixedUpdateUserCommand( SceneNetworkSystem system )
+	{
+		if ( Networking.IsHost )
+			return;
+
+		var localConnection = Connection.Local;
+		if ( localConnection is null )
+			return;
+
+		var userCommand = UserCommand.Create();
+		localConnection.BuildUserCommand( ref userCommand );
+		localConnection.Input.ApplyUserCommand( userCommand );
+
+		foreach ( var connection in system.GetFilteredConnections() )
+		{
+			if ( !connection.IsHost )
+				continue;
+
+			var msg = ByteStream.Create( 64 );
+			msg.Write( InternalMessageType.UserCommand );
+			userCommand.Serialize( ref msg );
 			connection.SendStream( msg, NetFlags.UnreliableNoDelay );
 			msg.Dispose();
 		}

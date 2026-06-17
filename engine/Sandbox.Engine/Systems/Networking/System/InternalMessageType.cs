@@ -27,6 +27,11 @@ internal enum InternalMessageType : byte
 	ClientTick,
 
 	/// <summary>
+	/// Per fixed-update input from a client to the host
+	/// </summary>
+	UserCommand,
+
+	/// <summary>
 	/// Set the cull state of a networked object
 	/// </summary>
 	SetCullState,

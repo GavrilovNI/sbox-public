@@ -138,24 +138,24 @@ protected override void OnFixedUpdate()
 
 ### `UserCommand.CommandNumber` (existing, internal)
 
-Each network tick, every client sends a `UserCommand` to the host inside `ClientTick` (`Scene.SendClientTick`).
+Each **fixed update**, every connected client sends a `UserCommand` to the host (`Scene.SendFixedUpdateUserCommand`, `InternalMessageType.UserCommand`). `ClientTick` at network rate only carries visibility origins.
 
 ```csharp
 // UserCommand.cs — internal, monotonic counter per session
 public uint CommandNumber { get; }  // 1, 2, 3, …
 public ulong Actions;               // bitmask of held input actions
-public Vector3 AnalogMove;          // snapshot of Input.AnalogMove at tick
-public Angles AnalogLook;           // snapshot of Input.AnalogLook at tick
+public Vector3 AnalogMove;          // snapshot of Input.AnalogMove for this fixed step
+public Angles AnalogLook;           // snapshot of Input.AnalogLook for this fixed step
 ```
 
 | Field | Purpose |
 |-------|---------|
-| `CommandNumber` | **Tick id** for this client's input packet. Increments every network update. Used to tag prediction history entries and align reconcile/truncation. **Not** a fixed-update counter — multiple physics steps may share one number if they occur before the next network tick. |
-| `Actions` | Which input actions are held (`Input.Actions` snapshot). Host applies via `Connection.ApplyUserCommand`. |
-| `AnalogMove` | Owner's `Input.AnalogMove` at network tick (WASD + gamepad move stick, post-`Input.Process`). |
-| `AnalogLook` | Owner's `Input.AnalogLook` at network tick (mouse + gamepad look, post-`Input.Process`, sensitivity applied). |
+| `CommandNumber` | **Fixed-step id** for this client's input. Increments once per `FixedUpdate` on the owner client. Tags prediction history entries and aligns reconcile/truncation **one command per physics step**. |
+| `Actions` | Which input actions are held (`Input.Actions` snapshot). Host applies via `Connection.ApplyUserCommand` once per fixed step. |
+| `AnalogMove` | Owner's `Input.AnalogMove` for this fixed step (WASD + gamepad move stick, post-`Input.Process`). |
+| `AnalogLook` | Owner's `Input.AnalogLook` for this fixed step (mouse + gamepad look, post-`Input.Process`, sensitivity applied). |
 
-**Prediction use:** when **owner client (non-host)** writes a predicted value, tag history with that owner's latest `UserCommand.CommandNumber` (from `Connection.Local` on owner machine). Host `HostDirect` writes do **not** use history replay — clear slot instead.
+**Prediction use:** when **owner client (non-host)** writes a predicted value, tag history with that owner's latest `UserCommand.CommandNumber` (from `Connection.Local.Input.LastCommandNumber` after `SendFixedUpdateUserCommand`). Host `HostDirect` writes do **not** use history replay — clear slot instead.
 
 Reset on disconnect / new session (`UserCommand.Reset()`).
 
@@ -163,9 +163,11 @@ Reset on disconnect / new session (`UserCommand.Reset()`).
 
 **Problem today:** on host, `Input.Down("forward")`, `Input.AnalogMove`, and `Input.AnalogLook` read **host local input**, not owner client. `PlayerController` uses all three — host sim would use wrong input without help.
 
-**What is synced today:** `UserCommand` → `Connection.Input` on host — **digital action bitmask only** (`Down` / `Pressed` / `Released`).
+**What is synced today:** `UserCommand` → `Connection.Input` on host — action bitmask (`Down` / `Pressed` / `Released`), `AnalogMove`, `AnalogLook`.
 
-**Prediction adds to `UserCommand`:** `AnalogMove` + `AnalogLook` — captured in `BuildUserCommand` from owner's local `Input` at each network tick, applied on host via `Connection.ApplyUserCommand`.
+**Per fixed update on owner client:** `SendFixedUpdateUserCommand` builds a command, applies it to `Connection.Local.Input` (command stream + `LastCommandNumber`), and sends `InternalMessageType.UserCommand` to the host.
+
+**Per fixed update on host:** `Connection.ConsumeAllFixedUpdateUserCommands()` dequeues one pending command per remote connection and calls `ApplyUserCommand` **before** component `FixedUpdate`. `Pressed` / `Released` edges come from consecutive `Actions` snapshots — same semantics as the owner command stream.
 
 #### Recommended API — scope (like existing `Input.PlayerScope`)
 
@@ -194,9 +196,9 @@ protected override void OnFixedUpdate()
 
 | Who runs sim | Scope behaviour |
 |--------------|-----------------|
-| Owner client | **No-op** — `Input.*` already local |
-| Host simulating client pawn | Redirect `Input.*` → `Network.Owner` (see below) |
-| Host on own pawn (listen) | No-op — `Owner` is local |
+| Owner client (predicting) | Redirect `Input.*` → `Connection.Local` **command stream** (`SimulationInputConnection`) |
+| Host simulating client pawn | Redirect `Input.*` → `Network.Owner` command stream |
+| Host on own pawn (listen) | No-op — local authority, no prediction overlay |
 | Unowned on host | Redirect → `Connection.Local` (`Owner` invalid) |
 | Proxy client | N/A — `ShouldSimulate` false |
 
@@ -209,14 +211,13 @@ Scope resolves input connection:
 Connection inputConnection = Network.OwnerId != Guid.Empty ? Network.Owner : Connection.Local;
 ```
 
-When host sims a client-owned pawn (connection ≠ `Connection.Local`):
+When host sims a client-owned pawn, or when **owner client (non-host)** sims with prediction:
 
-1. Save local `Input.AnalogMove` / `Input.AnalogLook` and input override state
-2. Redirect `Input.Down` / `Pressed` / `Released` → owner `Connection.Input` (same as `Connection.Down` path)
-3. Set `Input.AnalogMove` / `Input.AnalogLook` from owner's latest `UserCommand` values on that connection
-4. On dispose — restore saved local analog values and override state
+1. Set `Input.SimulationInputConnection` to the owner connection (`Network.Owner`, or `Connection.Local` on owner client)
+2. `Input.Down` / `Pressed` / `Released` / `AnalogMove` / `AnalogLook` read from that connection's `InputState` (updated once per fixed step via `UserCommand`)
+3. On dispose — restore previous `SimulationInputConnection`
 
-Owner client / listen host on own pawn: **no-op** — local `Input` already correct.
+Listen-server host on own pawn: **no-op** — `ShouldPredictLocally` is false; raw local `Input` is authoritative.
 
 `BuildUserCommand` on owner client (extend `Connection.Input.cs`):
 
@@ -239,16 +240,26 @@ cmd.AnalogLook = Input.AnalogLook;
 
 **Do not silently redirect global `Input.*` outside scope.**
 
-#### Input tick granularity
+#### Input fixed-step alignment
 
-`UserCommand` is sent once per network tick. Multiple `FixedUpdate` steps between ticks reuse the **same** owner `Actions`, `AnalogMove`, and `AnalogLook` on host — same as action bitmask today. Owner client runs local `Input.Process` every frame; host sim sees tick-sampled analog values.
+`UserCommand` is sent **once per fixed update**, not once per network tick. Owner and host both advance the command stream once per physics step:
 
-| Input | Owner client | Host sim (via scope) |
-|-------|-------------|----------------------|
-| `Input.Down` / `Pressed` / `Released` | Local | Owner `UserCommand.Actions` ✅ |
-| `Input.AnalogMove` | Local (per frame) | Owner `UserCommand.AnalogMove` ✅ |
-| `Input.AnalogLook` | Local (per frame) | Owner `UserCommand.AnalogLook` ✅ |
+| Step | Owner client | Host |
+|------|-------------|------|
+| Start of `FixedUpdate` | `SendFixedUpdateUserCommand` → build, `ApplyUserCommand` locally, send to host | `ConsumeAllFixedUpdateUserCommands` → one `ApplyUserCommand` per remote connection |
+| Sim (`SimulationInputScope`) | `Input.*` from local command stream | `Input.*` from owner command stream |
+| `Pressed` / `Released` | Edge from consecutive local commands | Edge from consecutive received commands |
+
+`ClientTick` at `NetworkRate` only updates visibility origins — input is not bundled there.
+
+| Input | Owner client (in scope) | Host sim (in scope) |
+|-------|------------------------|---------------------|
+| `Input.Down` / `Pressed` / `Released` | Command stream (`Connection.Local`) | Owner command stream |
+| `Input.AnalogMove` | Per fixed step | Owner per fixed step |
+| `Input.AnalogLook` | Per fixed step | Owner per fixed step |
 | Raw `Input.MouseDelta` | Local | **Not redirected** — use `AnalogLook` in sim code |
+
+Use `Input.Pressed` / `Input.Released` freely inside `SimulationInputScope` — no game-code workarounds required.
 
 ### Prediction activation (engine-internal, client overlay + history)
 
@@ -423,8 +434,7 @@ No log on hash match.
 
 ### CommandNumber in snapshots
 
-- Owner history entries: tag with owner client's `UserCommand.CommandNumber` at write time
-- Multiple `FixedUpdate` steps in one network tick share the same `CommandNumber`
+- Owner history entries: tag with owner client's `UserCommand.CommandNumber` at write time (one number per fixed step)
 - Host reconciliation snapshot: include `commandNumber` per predicted slot (owner's last processed command when host compared) so owner truncates history correctly
 - `HostDirect` snapshots: **no** commandNumber replay semantics — receiver clears history for affected slots
 
@@ -505,7 +515,7 @@ Values in `#if DEBUG` only.
 - Transform: slots 1–5, `TargetLocal`; **`WriteSnapshotState` skips transform when `IsProxy`** (line 586) — host does not emit transform for client-owned objects today
 - **`NetworkTable.WriteSnapshotState` / `ReadSnapshot` gate on `entry.HasControl(source)`** — owner-controlled slots ignore host as source today
 - `RemoteSnapshotState.AddPredicted` = ACK dedup, unrelated
-- `UserCommand` to host each network tick
+- `UserCommand` to host each fixed update (`InternalMessageType.UserCommand`); `ClientTick` = visibility only
 - Dedicated / listen / P2P: same code, `Networking.IsHost` divides prediction overlay
 - `DeltaSnapshotSystem.Send`: host **already** sends for `IsProxy` objects (`IsProxy && !IsHost` skip only) — prediction must fix **what** host writes, not whether send runs
 
@@ -519,9 +529,10 @@ Values in `#if DEBUG` only.
 - `NetworkTable.Entry.IsPredicted`, `dataTable.HasAnyPredictedSlot()`
 - `internal HasPrediction` + `RecalculateHasPrediction()` on register / flag change / hotload
 - Public: `ShouldSimulate`, `SimulationInputScope()` with XML docs
-- Extend `UserCommand`: `AnalogMove`, `AnalogLook` — serialize in `ClientTick`, apply in `ApplyUserCommand`
-- Extend `Connection.InputState` + `BuildUserCommand` to capture/restore analog values
-- New file `SimulationInputScope.cs` — reentrant scope; redirects actions + swaps `AnalogMove`/`AnalogLook` from owner connection
+- Extend `UserCommand`: `AnalogMove`, `AnalogLook` — serialize in per-fixed `UserCommand` message, queue on host, consume once per `FixedUpdate`
+- Extend `Connection.InputState` + `BuildUserCommand` to capture/restore analog values; command queue on host
+- New file `SimulationInputScope.cs` — reentrant scope; sets `Input.SimulationInputConnection` (owner on host, local command stream on predicting owner client)
+- `Scene.SendFixedUpdateUserCommand` at start of `InternalFixedUpdate`; `Connection.ConsumeAllFixedUpdateUserCommands` on host
 - Reject `Predicted | FromHost` and `[Sync(Predicted)]` on `GameObjectSystem` in **source generator** (compile error)
 - Predicted registration: host = network write authority; owner/host setter paths in codegen
 - `PredictionWriteSource` enum (internal): `OwnerPredicted` vs `HostDirect`
@@ -572,7 +583,8 @@ Values in `#if DEBUG` only.
 - Hash match → no log
 - Ownership change clears history
 - Dedicated + listen host-player (no overlay)
-- Host `SimulationInputScope`: `Input.Down`, `Input.AnalogMove`, `Input.AnalogLook` match owner `UserCommand`, not host local input
+- Host `SimulationInputScope`: `Input.Down`, `Pressed`, `Released`, `AnalogMove`, `AnalogLook` match owner per-fixed-step `UserCommand`
+- Owner predicting client: `SimulationInputScope` uses local command stream; `Pressed`/`Released` match host
 
 ---
 
@@ -619,13 +631,15 @@ Values in `#if DEBUG` only.
 | `IsOwner \|\| IsHost` for sim? | No — use `ShouldSimulate` |
 | Manual reconcile in game code? | No — engine only |
 | Who runs host sim? | Same `FixedUpdate` via `ShouldSimulate` |
-| Host input for client pawn? | `SimulationInputScope()` → owner `UserCommand` (`Actions`, `AnalogMove`, `AnalogLook`) |
+| Host input for client pawn? | `SimulationInputScope()` → owner per-fixed-step `UserCommand` (`Actions`, `AnalogMove`, `AnalogLook`, `Pressed`/`Released`) |
+| Owner input during prediction sim? | `SimulationInputScope()` → local command stream (same samples sent to host) |
 | Host local input during sim? | `Input.*` outside scope, or `Connection.Local` |
 | Explicit owner input? | `Network.Owner.Down(...)` — no separate property |
 | `HasPrediction`? | `internal`, cached on root |
 | Host teleport? | Authoritative push — immediate send, not reconciliation |
 | Merge conflicts? | New `partial` files, minimal edits to existing |
-| `Input.AnalogLook` on host sim? | Owner's `UserCommand.AnalogLook` via scope |
+| `Input.AnalogLook` on host sim? | Owner's per-fixed-step `UserCommand.AnalogLook` via scope |
+| `Input.Pressed` in sim? | Supported — command stream edges on owner and host inside `SimulationInputScope` |
 | `FromHost + Predicted`? | Generator error |
 | Prediction on all clients for all objects? | No — owner overlay + host sim only |
 | `RemoteSnapshotState.AddPredicted`? | Unchanged (ACK dedup) |
@@ -640,7 +654,8 @@ Values in `#if DEBUG` only.
 
 - [x] Public API minimal: flags + `ShouldSimulate` + `SimulationInputScope` only
 - [x] `HasPrediction` internal on `NetworkObject`; `NetworkAccessor.HasPrediction` reads root `_net`
-- [x] Host sim uses `ShouldSimulate` + `SimulationInputScope` → owner `Actions`, `AnalogMove`, `AnalogLook`
+- [x] Host sim uses `ShouldSimulate` + `SimulationInputScope` → owner per-fixed-step `Actions`, `AnalogMove`, `AnalogLook`, `Pressed`/`Released`
+- [x] Owner predicting client uses `SimulationInputScope` → local command stream aligned with host
 - [x] Two host→owner paths: **push** (`HostDirect`) vs **reconcile** (sim mismatch)
 - [x] Property writes: dev assigns once; engine handles overlay / push / reconcile
 - [x] Prediction scope: networked `GameObject` only — not `GameObjectSystem`

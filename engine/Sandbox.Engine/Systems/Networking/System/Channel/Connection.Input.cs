@@ -13,6 +13,31 @@ public abstract partial class Connection
 	}
 
 	/// <summary>
+	/// Apply one queued user command for this fixed update (host only).
+	/// </summary>
+	internal void ConsumeFixedUpdateUserCommand()
+	{
+		if ( !_pendingUserCommands.TryDequeue( out var cmd ) )
+			return;
+
+		Input.ApplyUserCommand( cmd );
+	}
+
+	/// <summary>
+	/// Apply one queued user command per remote connection (host only).
+	/// </summary>
+	internal static void ConsumeAllFixedUpdateUserCommands()
+	{
+		foreach ( var connection in All )
+		{
+			if ( connection == Local )
+				continue;
+
+			connection.ConsumeFixedUpdateUserCommand();
+		}
+	}
+
+	/// <summary>
 	/// Clear pending pressed and released actions for all connections in the Update context.
 	/// </summary>
 	internal static void ClearUpdateContextInput()
@@ -32,6 +57,24 @@ public abstract partial class Connection
 		{
 			connection.Input.ClearFixedUpdateContext();
 		}
+	}
+
+	readonly Queue<UserCommand> _pendingUserCommands = new();
+	uint _lastQueuedUserCommandNumber;
+
+	internal void QueueUserCommand( in UserCommand cmd )
+	{
+		var referenceNumber = _pendingUserCommands.Count > 0
+			? _lastQueuedUserCommandNumber
+			: Input.LastCommandNumber;
+
+		var commandNumberDelta = cmd.CommandNumber - referenceNumber;
+
+		if ( commandNumberDelta is 0 or > 0x7FFFFFFF )
+			return;
+
+		_pendingUserCommands.Enqueue( cmd );
+		_lastQueuedUserCommandNumber = cmd.CommandNumber;
 	}
 
 	internal struct InputState
@@ -124,8 +167,7 @@ public abstract partial class Connection
 	/// </summary>
 	public bool Down( [InputAction] string action )
 	{
-		// If this connection is us, just use our local input instead.
-		if ( Local == this )
+		if ( Local == this && Sandbox.Input.SimulationInputConnection != this )
 			return Sandbox.Input.Down( action );
 
 		if ( string.IsNullOrWhiteSpace( action ) )
@@ -144,8 +186,7 @@ public abstract partial class Connection
 	/// </summary>
 	public bool Pressed( [InputAction] string action )
 	{
-		// If this connection is us, just use our local input instead.
-		if ( Local == this )
+		if ( Local == this && Sandbox.Input.SimulationInputConnection != this )
 			return Sandbox.Input.Pressed( action );
 
 		if ( string.IsNullOrWhiteSpace( action ) )
@@ -166,8 +207,7 @@ public abstract partial class Connection
 	/// </summary>
 	public bool Released( [InputAction] string action )
 	{
-		// If this connection is us, just use our local input instead.
-		if ( Local == this )
+		if ( Local == this && Sandbox.Input.SimulationInputConnection != this )
 			return Sandbox.Input.Released( action );
 
 		if ( string.IsNullOrWhiteSpace( action ) )

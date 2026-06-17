@@ -279,6 +279,14 @@ public partial class Scene : GameObject
 		FixedUpdateInputContext.Flip();
 		using var _ = FixedUpdateInputContext.Push();
 
+		if ( SceneNetworkSystem.Instance is { } networkSystem )
+		{
+			if ( Networking.IsHost )
+				Connection.ConsumeAllFixedUpdateUserCommands();
+			else
+				SendFixedUpdateUserCommand( networkSystem );
+		}
+
 		using ( _fixedUpdateTimer.Start() )
 		{
 			Signal( GameObjectSystem.Stage.StartFixedUpdate );

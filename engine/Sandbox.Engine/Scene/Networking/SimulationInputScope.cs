@@ -10,41 +10,30 @@ public static partial class Input
 
 internal sealed class SimulationInputScopeImpl : IDisposable
 {
-	readonly GameObject _gameObject;
 	readonly Connection _inputConnection;
-	readonly ulong _savedActions;
-	readonly Vector3 _savedAnalogMove;
-	readonly Angles _savedAnalogLook;
 	readonly Connection _savedSimulationConnection;
 	readonly int _scopeDepth;
 	readonly bool _active;
 
 	public SimulationInputScopeImpl( GameObject gameObject )
 	{
-		_gameObject = gameObject;
-
 		var ownerId = gameObject.Network.OwnerId;
 		_inputConnection = ownerId != Guid.Empty ? gameObject.Network.Owner : Connection.Local;
 
-		_active = gameObject._net is not null
-			&& gameObject._net.HasPrediction
+		var networkObject = gameObject._net;
+		_active = networkObject is not null
+			&& networkObject.HasPrediction
 			&& _inputConnection is not null
-			&& _inputConnection != Connection.Local;
+			&& (_inputConnection != Connection.Local || networkObject.ShouldPredictLocally);
 
 		if ( !_active )
 			return;
 
 		_savedSimulationConnection = Input.SimulationInputConnection;
-		_savedActions = Input.Actions;
-		_savedAnalogMove = Input.AnalogMove;
-		_savedAnalogLook = Input.AnalogLook;
 		_scopeDepth = Input.SimulationInputScopeDepth;
 
 		Input.SimulationInputConnection = _inputConnection;
 		Input.SimulationInputScopeDepth = _scopeDepth + 1;
-		Input.Actions = _inputConnection.Input.Actions;
-		Input.AnalogMove = _inputConnection.Input.AnalogMove;
-		Input.AnalogLook = _inputConnection.Input.AnalogLook;
 	}
 
 	public void Dispose()
@@ -57,8 +46,5 @@ internal sealed class SimulationInputScopeImpl : IDisposable
 
 		Input.SimulationInputScopeDepth = _scopeDepth;
 		Input.SimulationInputConnection = _savedSimulationConnection;
-		Input.Actions = _savedActions;
-		Input.AnalogMove = _savedAnalogMove;
-		Input.AnalogLook = _savedAnalogLook;
 	}
 }

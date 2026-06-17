@@ -1,7 +1,7 @@
 ﻿namespace Sandbox;
 
 /// <summary>
-/// A User Command that will be sent to the current host every tick.
+/// A user command sent from a client to the host once per fixed update.
 /// </summary>
 internal struct UserCommand( uint commandNumber )
 {
@@ -18,12 +18,12 @@ internal struct UserCommand( uint commandNumber )
 	public ulong Actions;
 
 	/// <summary>
-	/// Owner's analog move at the last network tick.
+	/// Owner's analog move for this fixed update.
 	/// </summary>
 	public Vector3 AnalogMove;
 
 	/// <summary>
-	/// Owner's analog look at the last network tick.
+	/// Owner's analog look for this fixed update.
 	/// </summary>
 	public Angles AnalogLook;
 

@@ -106,15 +106,18 @@ internal sealed partial class NetworkObject
 			return;
 
 		_pendingHostDirectSend = true;
-		MainThread.Queue( SendPendingHostDirect );
+		SendPendingHostDirect();
 	}
 
 	void SendPendingHostDirect()
 	{
 		_pendingHostDirectSend = false;
 
+		if ( !GameObject.IsValid() || !Networking.IsHost )
+			return;
+
 		var system = SceneNetworkSystem.Instance;
-		if ( system is null || !Networking.IsHost )
+		if ( system is null )
 			return;
 
 		system.DeltaSnapshots.Send( this, NetFlags.Reliable | NetFlags.SendImmediate, true );

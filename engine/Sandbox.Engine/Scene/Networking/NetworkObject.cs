@@ -72,6 +72,12 @@ internal sealed partial class NetworkObject : IValid, IDeltaSnapshot
 	/// </summary>
 	public bool IsProxy { get; private set; }
 
+	internal void RefreshLocalProxyState()
+	{
+		UpdateIsOwner();
+		UpdateIsProxy();
+	}
+
 	private void UpdateIsProxy()
 	{
 		if ( _isNetworkSpawning || IsOwner || (IsUnowned && Networking.IsHost) )

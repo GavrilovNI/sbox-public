@@ -28,6 +28,14 @@ public partial class Scene : GameObject
 		networkedObjects.Remove( obj );
 	}
 
+	internal void RefreshAllNetworkProxyStates()
+	{
+		foreach ( var networkObject in networkedObjects )
+		{
+			networkObject.RefreshLocalProxyState();
+		}
+	}
+
 	RealTimeSince _timeSinceNetworkUpdate = 0f;
 
 	/// <summary>

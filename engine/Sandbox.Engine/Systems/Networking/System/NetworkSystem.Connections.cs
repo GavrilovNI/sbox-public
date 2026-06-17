@@ -120,6 +120,11 @@ internal partial class NetworkSystem
 	/// </summary>
 	internal void AddConnection( Connection source, UserInfo data )
 	{
+		_connections.Add( source );
+
+		if ( source.Id != Guid.Empty )
+			_connectionLookup[source.Id] = source;
+
 		var info = ConnectionInfo.Add( source );
 		info.Update( data );
 		OnConnectionInfoUpdated();

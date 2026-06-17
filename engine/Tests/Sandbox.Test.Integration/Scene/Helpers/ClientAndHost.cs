@@ -58,6 +58,7 @@ internal sealed class ClientAndHost : IDisposable
 		Connection.Local = Client;
 		Networking.System = _clientSystem;
 		SceneNetworkSystem.Instance = _clientSystem.GameSystem as SceneNetworkSystem;
+		RefreshNetworkProxyStates();
 	}
 
 	public void BecomeHost()
@@ -65,6 +66,13 @@ internal sealed class ClientAndHost : IDisposable
 		Connection.Local = Host;
 		Networking.System = _hostSystem;
 		SceneNetworkSystem.Instance = _hostSystem.GameSystem as SceneNetworkSystem;
+		RefreshNetworkProxyStates();
+	}
+
+	static void RefreshNetworkProxyStates()
+	{
+		if ( Game.ActiveScene is Scene scene )
+			scene.RefreshAllNetworkProxyStates();
 	}
 
 	/// <summary>
@@ -73,8 +81,17 @@ internal sealed class ClientAndHost : IDisposable
 	/// </summary>
 	public void Dispose()
 	{
+		Input.SimulationInputConnection = null;
+		Input.SimulationInputScopeDepth = 0;
+
 		Networking.System = _previousNetworkSystem;
 		SceneNetworkSystem.Instance = _previousSceneNetworkSystem;
 		Connection.Local = _previousLocalConnection;
+
+		if ( _hostSystem.GameSystem is SceneNetworkSystem hostScene && hostScene != _previousSceneNetworkSystem )
+			hostScene.Dispose();
+
+		if ( _clientSystem.GameSystem is SceneNetworkSystem clientScene && clientScene != _previousSceneNetworkSystem )
+			clientScene.Dispose();
 	}
 }
